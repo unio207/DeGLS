@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DeGLS - Mobile Detection System</title>
+    <script src="https://cdn.botpress.cloud/webchat/v2.3/inject.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+            background-color: #cfdca5;
+            color: #344e41;
+        }
+
+        .container {
+            max-width: 480px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        .form-wrapper {
+            background-color: #ecf4dc;
+            border: 2px solid #688042;
+            border-radius: 12px;
+            padding: 18px;
+            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
+        }
+
+        h1 {
+            text-align: center;
+            font-size: 24px;
+            margin-bottom: 20px;
+            color: #688042;
+        }
+
+        .logo {
+            display: block;
+            margin: 0 auto 20px;
+            width: 100px;
+        }
+
+        form {
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+
+        label {
+            font-weight: bold;
+            font-size: 14px;
+        }
+
+        input, button {
+            padding: 10px;
+            font-size: 14px;
+            border-radius: 8px;
+            border: 1px solid #688042;
+            box-sizing: border-box;
+        }
+
+        input:focus {
+            outline: none;
+            border-color: #ecce15;
+        }
+
+        button {
+            background-color: #688042;
+            color: white;
+            font-weight: bold;
+            cursor: pointer;
+        }
+
+        button:hover {
+            background-color: #5a6c37;
+        }
+
+        .location-wrapper {
+            display: flex;
+            gap: 10px;
+        }
+
+        #location {
+            flex: 1;
+        }
+
+        .images-container {
+            display: flex;
+            justify-content: space-between;
+            margin: 15px 0;
+            gap: 10px;
+        }
+
+        .image-wrapper {
+            width: 48%;  
+        }
+
+        .image-wrapper img {
+            width: 100%;  
+            border-radius: 8px;
+        }
+
+        #processed-image-wrapper {
+            display: none;  
+        }
+
+        #diagnosis {
+            background-color: #ecf4dc;  
+            border: 2px solid #688042;  
+            border-radius: 12px;  
+            padding: 15px;  
+            margin-top: 20px;  
+            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
+            text-align: center;
+        }
+        
+        #diagnosis h2 {
+            color: #688042;
+            margin-top: 0;
+        }
+
+        /* Chatbot styling */
+        #chatbot-container {
+            width: 100%;
+            height: 500px; /* Adjust height if needed */
+            margin-top: 20px;
+            border: 2px solid #688042;
+            border-radius: 12px;
+            overflow: hidden;
+            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
+        }
+
+        .btn-recommendations {
+            margin-top: 15px;
+            padding: 10px;
+            font-size: 14px;
+            background-color: #688042;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            width: 100%;
+        }
+
+        .btn-recommendations:hover {
+            background-color: #5a6c37;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <img src="/static/images/logo.png" alt="DeGLS Logo" class="logo">
+            
+        <h1>DeGLS - Detection System</h1>
+
+        <div class="form-wrapper">
+            <form action="/" method="POST" enctype="multipart/form-data" onsubmit="handleFormSubmission(event)">
+                <label for="file-upload">Upload an image of the plant leaf:</label>
+                <input type="file" name="file" id="file-upload" accept="image/*" required onchange="previewImage(event)">
+
+                <label for="corn-hybrid">Corn Hybrid Name:</label>
+                <input type="text" name="corn_hybrid" id="corn-hybrid" placeholder="Enter corn hybrid name" required>
+
+                <label for="location">Location:</label>
+                <div class="location-wrapper">
+                    <input type="text" name="location" id="location" placeholder="Enter location" required>
+                    <button type="button" onclick="useCurrentLocation()">📍</button>
+                </div>
+
+                <label for="date">Date:</label>
+                <input type="date" name="date" id="date" required>
+
+                <button type="submit">Assess Severity</button>
+            </form>
+        </div>
+
+        <div id="output" class="images-container">
+            <div class="image-wrapper">
+                <h3>Original Image</h3>
+                <img src="" alt="Original Image" id="original-image">
+            </div>
+            <div id="processed-image-wrapper" class="image-wrapper">
+                <h3>Processed Image</h3>
+                <img src="" alt="Processed Image" id="processed-image">
+            </div>
+        </div>
+
+        <div id="diagnosis"></div>
+
+        
+        <script src="https://cdn.botpress.cloud/webchat/v2.2/inject.js"></script>
+
+    </div>
+
+    <script>
+        function previewImage(event) {
+            const file = event.target.files[0];
+            if (file) {
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    document.getElementById('original-image').src = e.target.result;
+                };
+                reader.readAsDataURL(file);
+            }
+        }
+
+        function handleFormSubmission(event) {
+            event.preventDefault();
+            const formData = new FormData(event.target);
+
+            fetch(event.target.action, {
+                method: 'POST',
+                body: formData,
+            })
+                .then((response) => response.json())
+                .then((data) => {
+                    document.getElementById('processed-image-wrapper').style.display = 'block';
+                    document.getElementById('processed-image').src = `/static/processed/${data.overlayed_image}`;
+
+                    document.getElementById('diagnosis').innerHTML = `
+                        <h2>Diagnosis</h2>
+                        <p><strong>Disease Type:</strong> ${data.disease_type}</p>
+                        <p><strong>Leaf Infection Severity:</strong> ${data.percent_severity}%</p>
+                        <p><strong>Processing Time:</strong> ${data.processing_time} seconds</p>
+                        <button id="recommendations-button" class="btn-recommendations">Get Management Recommendations</button>
+                    `;
+
+                    window.botpress.init({
+                        "botId": "cce3adcc-63de-49ae-8f1a-606e122557f7",
+                        "configuration": {
+                        "composerPlaceholder": "Chat with DeGLS",
+                        "botName": "DeGLS",
+                        "botAvatar": "https://files.bpcontent.cloud/2025/03/23/00/20250323001326-7K9XYHBU.png",
+                        "botDescription": "AI-Assisted Management Recommendations",
+                        "website": {},
+                        "email": {},
+                        "phone": {},
+                        "termsOfService": {},
+                        "privacyPolicy": {},
+                        "color": "#688042",
+                        "variant": "solid",
+                        "themeMode": "light",
+                        "fontFamily": "inter",
+                        "radius": 1.5,
+                        "additionalStylesheetUrl": "https://files.bpcontent.cloud/2025/03/23/00/20250323004401-ARI910VZ.css",
+                        "allowFileUpload": true
+                        },
+                        "clientId": "e1dd609e-e2fb-44e7-b5d7-bfc2a99365c9",
+                        "user": {
+                            "data": {
+                                "hybrid": data.corn_hybrid,
+                                "location": data.location,
+                                "date": data.date,
+                                "disease_type": data.disease_type,
+                                "percent_severity": data.percent_severity
+                            }
+                        }
+                    });
+
+                    // Add an event listener to the button to send a message to the chatbot
+                    document.getElementById('recommendations-button').addEventListener('click', async () => {
+                        const message = `Hybrid: ${data.corn_hybrid}, Location: ${data.location}, Date: ${data.date}, Disease Type: ${data.disease_type}, Severity: ${data.percent_severity}%`;
+                        await window.botpress.sendMessage(message);
+                    });
+
+                })
+                .catch((error) => {
+                    console.error('Error:', error);
+                });
+        }
+
+        function useCurrentLocation() {
+            if (navigator.geolocation) {
+                navigator.geolocation.getCurrentPosition((position) => {
+                    document.getElementById('location').value = `Lat: ${position.coords.latitude}, Lon: ${position.coords.longitude}`;
+                }, () => {
+                    alert('Unable to retrieve location.');
+                });
+            } else {
+                alert('Geolocation is not supported by this browser.');
+            }
+        }
+
+    </script>
+</body>
+</html>
