@@ -4,9 +4,8 @@ Werkzeug
 Jinja2
 gunicorn
 opencv-python
-numpy
 Pillow
-botpress
+numpy>=1.22
 requests
 python-dotenv
 matplotlib
