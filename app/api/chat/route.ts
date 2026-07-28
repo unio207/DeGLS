@@ -27,10 +27,21 @@ import type { DiagnosisUIMessage } from "@/components/chat/types";
 export const runtime = "nodejs";
 export const maxDuration = 60;
 
-// gpt-5.x mini: fast enough to stream responsively on a phone in a field, strong
-// enough to reason over a dozen retrieved extension passages. Override per-deploy
-// with OPENAI_CHAT_MODEL.
-const CHAT_MODEL = process.env.OPENAI_CHAT_MODEL ?? "gpt-5.4-mini";
+// gpt-5.4-nano: $0.20/1M in, $1.25/1M out - roughly 3.7x cheaper than 5.4-mini
+// ($0.75/$4.50). This route synthesises an answer from passages RAG has already
+// selected rather than reasoning open-endedly, which is the workload small models
+// handle well, so the cheaper tier is the right default here.
+//
+// If citation formatting or answer quality degrades, this is a one-variable
+// rollback: set OPENAI_CHAT_MODEL=gpt-5.4-mini in the Vercel project settings.
+// No redeploy of code required.
+const CHAT_MODEL = process.env.OPENAI_CHAT_MODEL ?? "gpt-5.4-nano";
+
+// Request ceilings for the public, unauthenticated chat endpoint. See the cost
+// guard in POST below for why these exist.
+const MAX_MESSAGES = 40;
+const MAX_MESSAGE_CHARS = 4_000;
+const MAX_TOTAL_CHARS = 24_000;
 
 const RETRIEVAL_K = 6;
 
@@ -177,6 +188,33 @@ export async function POST(req: Request) {
   const messages = Array.isArray(body.messages) ? body.messages : [];
   if (messages.length === 0) {
     return Response.json({ error: "No messages supplied." }, { status: 400 });
+  }
+
+  // Cost guard. This route is public and unauthenticated, and the model has a
+  // 400k-token context window, so an unbounded body is a direct route to
+  // draining the account's OpenAI credit. Cap the conversation before it ever
+  // reaches the provider. These ceilings are far above any genuine field
+  // question - the longest suggested prompt is ~90 characters.
+  if (messages.length > MAX_MESSAGES) {
+    return Response.json(
+      { error: `Conversation too long: ${messages.length} messages, limit ${MAX_MESSAGES}.` },
+      { status: 413 },
+    );
+  }
+
+  const totalChars = messages.reduce((sum, message) => sum + messageText(message).length, 0);
+  if (totalChars > MAX_TOTAL_CHARS) {
+    return Response.json(
+      { error: `Conversation too large: ${totalChars} characters, limit ${MAX_TOTAL_CHARS}.` },
+      { status: 413 },
+    );
+  }
+
+  if (messages.some((message) => messageText(message).length > MAX_MESSAGE_CHARS)) {
+    return Response.json(
+      { error: `Message too long; limit ${MAX_MESSAGE_CHARS} characters.` },
+      { status: 413 },
+    );
   }
 
   const context = body.context;

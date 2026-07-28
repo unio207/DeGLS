@@ -66,3 +66,5 @@ legacy/**/static/uploads/
 
 .vercel
 .env*
+
+.env*
