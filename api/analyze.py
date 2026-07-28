@@ -119,6 +119,31 @@ DEFAULT_TTA = _env_bool("DEGLS_TTA", False)
 # 0 disables. On by default with a small value: single-pixel specks are noise.
 DEFAULT_MIN_BLOB = _env_int("DEGLS_MIN_BLOB", 64)
 
+# Leaf-plausibility guard.
+#
+# The detector was trained on three corn diseases with no background/reject
+# class, so it is wildly overconfident out of distribution: uniform random noise
+# comes back as corn_gls @ 0.9992 with a 78.6% severity reading, and flat grey,
+# white and sky all come back >0.97. Confirmed against the original yolo.pt, so
+# this is the model, not the ONNX port. Without this guard `no_leaf_detected`
+# essentially never fires and a photo of a wall yields a confident diagnosis.
+#
+# Two cheap checks on the detected region, each covering a different failure
+# family, with measured margins on the 7 fixtures:
+#
+#                       veg_frac          roughness
+#   real leaves         0.740 - 0.991     26.5 - 86.9
+#   random noise        0.489             362.5        <- roughness catches it
+#   grey/white/sky      0.000             0.0 - 1.2    <- veg_frac catches it
+#
+# Limits worth being honest about: this rejects flat surfaces, sky and static.
+# It will NOT reject a photo of some other green plant, and a real hand may
+# partially satisfy the tan/brown band. It raises the floor; it is not a
+# substitute for a reject class.
+DEFAULT_PLAUSIBILITY = _env_bool("DEGLS_PLAUSIBILITY", True)
+DEFAULT_MIN_VEG_FRAC = _env_float("DEGLS_MIN_VEG_FRAC", 0.45)
+DEFAULT_MAX_ROUGHNESS = _env_float("DEGLS_MAX_ROUGHNESS", 150.0)
+
 
 class PipelineError(Exception):
     def __init__(self, code: str, message: str, status: int = 400):
@@ -192,6 +217,35 @@ def run_yolo(img_bgr: np.ndarray) -> list:
     return yolo_postprocess(
         out0, out1, orig_shape=img_bgr.shape[:2], lb_shape=(YOLO_IMGSZ, YOLO_IMGSZ), nc=YOLO_NC
     )
+
+
+def leaf_plausibility(img_bgr: np.ndarray, leaf_mask: np.ndarray) -> Tuple[float, float]:
+    """Return (vegetation_fraction, roughness) for the detected region.
+
+    vegetation_fraction: share of masked pixels whose hue/saturation is
+    consistent with corn foliage - green through yellow through the tan/brown of
+    a lesion - and which are not washed out or near-black.
+
+    roughness: mean absolute Laplacian, i.e. high-frequency energy. Real foliage
+    photographed at any sane distance is far smoother than synthetic static.
+    """
+    m = leaf_mask.astype(bool)
+    if not m.any():
+        return 0.0, 0.0
+
+    hsv = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2HSV)
+    h = hsv[:, :, 0][m].astype(np.int16)
+    s = hsv[:, :, 1][m].astype(np.int16)
+    v = hsv[:, :, 2][m].astype(np.int16)
+
+    green_or_yellow = (h >= 20) & (h <= 95)
+    tan_or_brown = (h >= 5) & (h < 20)
+    vegetation = (green_or_yellow | tan_or_brown) & (s >= 45) & (v >= 35)
+
+    grey = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY).astype(np.float32)
+    roughness = float(np.abs(cv2.Laplacian(grey, cv2.CV_32F, ksize=3))[m].mean())
+
+    return float(vegetation.mean()), roughness
 
 
 def apply_leaf_mask(img_bgr: np.ndarray, leaf_mask: np.ndarray) -> np.ndarray:
@@ -293,10 +347,16 @@ def analyze(
     threshold: float = None,
     tta: bool = None,
     min_blob: int = None,
+    plausibility: bool = None,
+    min_veg_frac: float = None,
+    max_roughness: float = None,
 ) -> Dict[str, Any]:
     threshold = DEFAULT_THRESHOLD if threshold is None else threshold
     tta = DEFAULT_TTA if tta is None else tta
     min_blob = DEFAULT_MIN_BLOB if min_blob is None else min_blob
+    plausibility = DEFAULT_PLAUSIBILITY if plausibility is None else plausibility
+    min_veg_frac = DEFAULT_MIN_VEG_FRAC if min_veg_frac is None else min_veg_frac
+    max_roughness = DEFAULT_MAX_ROUGHNESS if max_roughness is None else max_roughness
 
     t0 = time.perf_counter()
     img = decode_image(raw)
@@ -320,6 +380,17 @@ def analyze(
     # Both are fixed by taking the single highest-confidence instance.
     top = instances[0]  # postprocess() returns confidence-sorted instances
     code = CLASS_NAMES.get(top.cls_id, str(top.cls_id))
+
+    # The detector has no reject class, so a high confidence here means nothing
+    # about whether the subject is a leaf at all. Check the pixels directly.
+    veg_frac, roughness = leaf_plausibility(img, top.mask)
+    if plausibility and (veg_frac < min_veg_frac or roughness > max_roughness):
+        raise PipelineError(
+            "no_leaf_detected",
+            "This does not look like a corn leaf. Fill the frame with a single "
+            "leaf in even light and try again.",
+            200,
+        )
 
     segmented = apply_leaf_mask(img, top.mask)
 
@@ -350,6 +421,12 @@ def analyze(
                 "threshold": threshold,
                 "tta": bool(tta),
                 "min_blob": min_blob,
+            },
+            # Surfaced so a borderline pass can be inspected without re-running.
+            "plausibility": {
+                "vegetation_fraction": round(veg_frac, 4),
+                "roughness": round(roughness, 2),
+                "enforced": bool(plausibility),
             },
         },
     }
