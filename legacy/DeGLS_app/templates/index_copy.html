@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DeGLS - Basic Functionality</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+        }
+        .container {
+            display: flex;
+            flex-direction: row;
+            gap: 20px;
+        }
+        .form-container {
+            flex: 1;
+        }
+        .image-container {
+            flex: 2;
+        }
+        .form-container form {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+        .form-container label {
+            font-weight: bold;
+        }
+        .form-container input, .form-container button {
+            padding: 8px;
+            font-size: 14px;
+        }
+        .form-container button {
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            cursor: pointer;
+        }
+        .form-container button:hover {
+            background-color: #45a049;
+        }
+    </style>
+</head>
+<body>
+    <h1>DeGLS - Detection System for Gray Leaf Spot</h1>
+
+    <!-- Main container -->
+    <div class="container">
+        <!-- Form container -->
+        <div class="form-container">
+            <form action="/" method="POST" enctype="multipart/form-data" onsubmit="handleFormSubmission(event)">
+                <label for="file-upload">Upload an image of the plant leaf:</label>
+                <input type="file" name="file" id="file-upload" accept="image/*" required onchange="previewImage(event)">
+
+                <label for="corn-hybrid">Corn Hybrid Name:</label>
+                <input type="text" name="corn_hybrid" id="corn-hybrid" placeholder="Enter corn hybrid name" required>
+
+                <label for="location">Location:</label>
+                <div style="display: flex; gap: 10px;">
+                    <input type="text" name="location" id="location" placeholder="Enter location" required>
+                    <button type="button" onclick="useCurrentLocation()">Use Current Location</button>
+                </div>
+
+                <label for="date">Date:</label>
+                <input type="date" name="date" id="date" required>
+
+                <button type="submit">Assess Severity</button>
+            </form>
+        </div>
+
+        <!-- Image container -->
+        <div class="image-container" id="output">
+            <!-- The images will be displayed here -->
+        </div>
+
+        <!-- Diagnosis container -->
+        <div id="diagnosis">
+            <!-- The diagnosis will be displayed here -->
+        </div>
+
+        <!-- Get Management Recommendations Button -->
+        <div id="recommendations-container" style="display: none; margin-top: 20px;">
+            <button onclick="showRecommendations()">Get Management Recommendations</button>
+        </div>
+
+        <!-- Chatbot iframe -->
+        <div id="chatbot-container" style="display: none; margin-top: 20px;">
+            <iframe
+                src="https://app.thinkstack.ai/bot/index.html?chatbot_id=67dc9c4311e85754f9df8055&type=inline"
+                frameborder="0"
+                width="50%"
+                height="100%"
+                style="min-height: 500px;">
+            </iframe>
+        </div>
+    </div>
+
+    <script>
+        // Function to preview the uploaded image
+        function previewImage(event) {
+            const file = event.target.files[0];
+            if (file) {
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    const outputDiv = document.getElementById('output');
+                    outputDiv.innerHTML = `
+                        <div>
+                            <h2>Original Image</h2>
+                            <img src="${e.target.result}" alt="Original Image" style="max-width: 100%; height: auto;">
+                        </div>
+                    `;
+                };
+                reader.readAsDataURL(file);
+            }
+        }
+
+        // Function to handle form submission
+        function handleFormSubmission(event) {
+            event.preventDefault(); // Prevent the default form submission behavior
+
+            // Prepare form data for submission
+            const formData = new FormData(event.target);
+
+            // Send the form data to the server using AJAX
+            fetch(event.target.action, {
+                method: 'POST',
+                body: formData,
+            })
+                .then((response) => response.json())
+                .then((data) => {
+                    console.log('Form submitted successfully:', data);
+
+                    // Display the overlayed image
+                    const outputDiv = document.getElementById('output');
+                    outputDiv.innerHTML += `
+                        <div>
+                            <h2>Detected Areas</h2>
+                            <img src="/static/processed/${data.overlayed_image}" alt="Overlayed Image" style="max-width: 100%; height: auto;">
+                        </div>
+                        <div>
+                            <h3>⏱️ Processing Time: ${data.processing_time} seconds</h3>
+                        </div>
+                    `;
+
+                    // Display the diagnosis box
+                    const diagnosisDiv = document.getElementById('diagnosis');
+                    diagnosisDiv.innerHTML = `
+                        <div style="border: 1px solid #ccc; padding: 10px; border-radius: 5px; background-color: #f9f9f9;">
+                            <h2>Diagnosis</h2>
+                            <p><strong>Disease Type:</strong> ${data.disease_type}</p>
+                            <p><strong>Processing Time:</strong> ${data.processing_time} seconds</p>
+                        </div>
+                    `;
+
+                    const recommendationsContainer = document.getElementById('recommendations-container');
+                    recommendationsContainer.style.display = 'block';
+                })
+                .catch((error) => {
+                    console.error('Error submitting form:', error);
+                });
+        }
+
+        // Function to show the chatbot iframe
+        function showRecommendations() {
+            const chatbotContainer = document.getElementById('chatbot-container');
+            chatbotContainer.style.display = 'block';
+        }
+
+        // Function to use the current location
+        function useCurrentLocation() {
+            if (navigator.geolocation) {
+                navigator.geolocation.getCurrentPosition(
+                    (position) => {
+                        const latitude = position.coords.latitude;
+                        const longitude = position.coords.longitude;
+                        const locationInput = document.getElementById('location');
+                        locationInput.value = `Lat: ${latitude}, Lon: ${longitude}`;
+                    },
+                    (error) => {
+                        alert('Unable to retrieve your location. Please enter it manually.');
+                        console.error('Geolocation error:', error);
+                    }
+                );
+            } else {
+                alert('Geolocation is not supported by your browser.');
+            }
+        }
+    </script>
+
+</body>
+</html>
