@@ -118,17 +118,17 @@ export function ScanError({
       aria-live="assertive"
       className="bg-card animate-rise overflow-hidden rounded-2xl border"
     >
-      <div className="bg-secondary text-secondary-foreground flex items-start gap-3 px-4 py-3.5">
+      <div className="bg-secondary text-secondary-foreground flex items-start gap-3 px-4 py-3.5 md:px-5 md:py-4">
         <Icon className="mt-0.5 size-5 shrink-0" />
-        <h2 className="font-display text-lg leading-tight font-bold">{copy.title}</h2>
+        <h2 className="font-display text-lg leading-tight font-bold md:text-xl">{copy.title}</h2>
       </div>
 
-      <div className="space-y-4 p-4">
-        <p className="text-[0.9375rem] leading-relaxed">{copy.body}</p>
+      <div className="space-y-4 p-4 md:space-y-5 md:p-5">
+        <p className="text-[0.9375rem] leading-relaxed md:text-base">{copy.body}</p>
 
         <ul className="space-y-2">
           {copy.tips.map((tip) => (
-            <li key={tip} className="flex gap-2.5 text-[0.9375rem] leading-snug">
+            <li key={tip} className="flex gap-2.5 text-[0.9375rem] leading-snug md:text-base">
               <span className="bg-primary mt-2 size-1.5 shrink-0 rounded-full" aria-hidden />
               <span>{tip}</span>
             </li>
@@ -143,20 +143,26 @@ export function ScanError({
 
         <div className="grid gap-2">
           {copy.primary === "retake" ? (
-            <Button onClick={onRetake} className="h-13 w-full gap-2.5 rounded-xl text-base font-semibold">
-              <CameraIcon aria-hidden className="size-5" />
+            <Button
+              onClick={onRetake}
+              className="h-14 w-full gap-2.5 rounded-xl text-base font-semibold md:h-15 md:text-lg"
+            >
+              <CameraIcon aria-hidden className="size-5 md:size-6" />
               Take another photo
             </Button>
           ) : (
-            <Button onClick={onRetry} className="h-13 w-full gap-2.5 rounded-xl text-base font-semibold">
-              <RotateCwIcon aria-hidden className="size-5" />
+            <Button
+              onClick={onRetry}
+              className="h-14 w-full gap-2.5 rounded-xl text-base font-semibold md:h-15 md:text-lg"
+            >
+              <RotateCwIcon aria-hidden className="size-5 md:size-6" />
               Try again
             </Button>
           )}
           <Button
             variant="outline"
             onClick={copy.primary === "retake" ? onRetry : onRetake}
-            className="tap w-full rounded-xl text-[0.9375rem]"
+            className="h-12 w-full rounded-xl text-[0.9375rem] md:h-13 md:text-base"
           >
             {copy.primary === "retake" ? "Send this photo again anyway" : "Take another photo"}
           </Button>

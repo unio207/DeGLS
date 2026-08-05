@@ -254,14 +254,35 @@
     padding-bottom: env(safe-area-inset-bottom);
   }
 
+  /* These utilities are emitted after Tailwind's, so a bare
+     `padding-left: env(...)` silently beat any `px-*` on the same element and
+     resolved to 0 on a device with no inset — <main> was measured flush to both
+     screen edges. The inset is now a floor under a caller-supplied minimum
+     instead of a replacement for it: set --safe-x and drop the px-* class. */
   .safe-x {
-    padding-left: env(safe-area-inset-left);
-    padding-right: env(safe-area-inset-right);
+    padding-left: max(env(safe-area-inset-left), var(--safe-x, 0px));
+    padding-right: max(env(safe-area-inset-right), var(--safe-x, 0px));
   }
 
-  /* Every interactive control in the scan flow clears the 44px target. */
+  /* The floor for any interactive control, not a size in its own right.
+     44px is Apple's phone target; on a tablet the raise to 48px is deliberate.
+     A 10" slab is held with one hand under it and tapped with the other, so the
+     tapping hand is unbraced — the precision a thumb gets from gripping a phone
+     is not available. Controls that need to stay square carry `md:size-12`
+     alongside this so the extra height does not stretch them into rectangles.
+
+     Sized controls sit above this floor on the same two-step scale:
+       primary full-width action   h-14  ->  md:h-15   (56 -> 60)
+       secondary action and input  h-12  ->  md:h-13   (48 -> 52)
+       icon button                 size-11 -> md:size-12 (44 -> 48) */
   .tap {
     min-height: 44px;
+  }
+
+  @media (min-width: 48rem) {
+    .tap {
+      min-height: 48px;
+    }
   }
 }
 

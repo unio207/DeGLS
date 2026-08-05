@@ -96,7 +96,7 @@ export function CaptureCard({
               alt="The leaf photo you selected"
               className="absolute inset-0 h-full w-full object-cover"
             />
-            <div className="absolute right-3 bottom-3 flex gap-2">
+            <div className="absolute right-3 bottom-3 flex gap-2 md:right-4 md:bottom-4">
               <Button
                 variant="outline"
                 onClick={() => setCropOpen(true)}
@@ -120,13 +120,13 @@ export function CaptureCard({
         ) : (
           <div className="absolute inset-0 grid place-items-center px-6 text-center">
             <div>
-              <div className="veins bg-secondary text-primary mx-auto grid size-16 place-items-center rounded-2xl">
-                <CameraIcon aria-hidden className="size-8" />
+              <div className="veins bg-secondary text-primary mx-auto grid size-16 place-items-center rounded-2xl md:size-20">
+                <CameraIcon aria-hidden className="size-8 md:size-10" />
               </div>
-              <p className="font-display mt-4 text-lg leading-tight font-bold">
+              <p className="font-display mt-4 text-lg leading-tight font-bold md:mt-5 md:text-2xl">
                 Photograph one leaf
               </p>
-              <p className="text-muted-foreground mx-auto mt-1.5 max-w-[26ch] text-sm leading-snug">
+              <p className="text-muted-foreground mx-auto mt-1.5 max-w-[26ch] text-sm leading-snug md:mt-2.5 md:text-base">
                 Fill the frame with the blade. Even light, no hard shadow, plain background if you
                 can manage one.
               </p>
@@ -139,16 +139,16 @@ export function CaptureCard({
         <Button
           onClick={() => cameraRef.current?.click()}
           disabled={disabled}
-          className="h-14 w-full gap-2.5 rounded-xl text-base font-semibold"
+          className="h-14 w-full gap-2.5 rounded-xl text-base font-semibold md:h-15 md:text-lg"
         >
-          <CameraIcon aria-hidden className="size-5" />
+          <CameraIcon aria-hidden className="size-5 md:size-6" />
           {previewUrl ? "Take another photo" : "Take a photo"}
         </Button>
         <Button
           variant="outline"
           onClick={() => libraryRef.current?.click()}
           disabled={disabled}
-          className="tap w-full gap-2.5 rounded-xl text-[0.9375rem]"
+          className="h-12 w-full gap-2.5 rounded-xl text-[0.9375rem] md:h-13 md:text-base"
         >
           <ImageIcon aria-hidden />
           Choose from library

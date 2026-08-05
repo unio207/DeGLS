@@ -33,7 +33,7 @@ export function ProgressStages({
     <section
       aria-live="polite"
       aria-busy="true"
-      className="bg-card animate-rise rounded-2xl border p-4"
+      className="bg-card animate-rise rounded-2xl border p-4 md:p-5"
     >
       <div className="flex items-baseline justify-between">
         <h2 className="eyebrow text-muted-foreground">Working</h2>
@@ -118,7 +118,7 @@ function Stage({
       <div className="min-w-0 flex-1">
         <p
           className={[
-            "text-[0.9375rem] leading-tight font-medium",
+            "text-[0.9375rem] leading-tight font-medium md:text-base",
             state === "waiting" ? "text-muted-foreground" : "text-foreground",
           ].join(" ")}
         >

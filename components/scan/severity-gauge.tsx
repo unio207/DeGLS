@@ -49,15 +49,15 @@ export function SeverityGauge({ percent }: { percent: number }) {
       </div>
 
       <div className="flex items-end gap-1.5">
-        <span className="tabular font-display text-[3.75rem] leading-[0.85] font-extrabold tracking-tighter">
+        <span className="tabular font-display text-[3.75rem] leading-[0.85] font-extrabold tracking-tighter md:text-[4.75rem]">
           {formatSeverity(percent)}
         </span>
-        <span className="font-display pb-1 text-2xl font-semibold opacity-70">%</span>
+        <span className="font-display pb-1 text-2xl font-semibold opacity-70 md:pb-1.5 md:text-3xl">%</span>
       </div>
 
       <div>
         <div
-          className="border-border relative h-11 w-full overflow-hidden rounded-lg border"
+          className="border-border relative h-11 w-full overflow-hidden rounded-lg border md:h-14"
           role="img"
           aria-label={`${formatSeverity(percent)} percent of leaf area, in the ${BAND_LABEL[band].toLowerCase()} display band`}
         >

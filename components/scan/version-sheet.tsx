@@ -27,6 +27,16 @@ export interface VersionEntry {
 
 export const VERSIONS: VersionEntry[] = [
   {
+    version: "0.7.0",
+    date: "2026-08-05",
+    notes: [
+      "New map of past scans, with pins coloured by severity. Scans taken with the locate button appear on it.",
+      "Location now names your town instead of the civil township — it was reading \"Township of Webster\" for Johnston.",
+      "Assistant answers are much shorter, and each leaf keeps its own conversation so you can pick up where you left off.",
+      "Laid out for iPad, and fixed content sitting flush against the screen edge on every device.",
+    ],
+  },
+  {
     version: "0.6.0",
     date: "2026-08-05",
     notes: [
@@ -91,13 +101,13 @@ export function VersionSheet({
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent
         side="bottom"
-        className="safe-bottom flex flex-col overflow-hidden rounded-t-2xl p-0 data-[side=bottom]:h-[70dvh]"
+        className="safe-bottom mx-auto flex flex-col overflow-hidden rounded-t-2xl p-0 data-[side=bottom]:h-[70dvh] md:max-w-xl md:rounded-t-3xl md:data-[side=bottom]:h-[62dvh]"
       >
-        <SheetHeader className="shrink-0 border-b px-4 py-3.5">
-          <SheetTitle className="font-display text-lg font-extrabold tracking-tight">
+        <SheetHeader className="shrink-0 border-b px-4 py-3.5 md:px-5 md:py-4">
+          <SheetTitle className="font-display text-lg font-extrabold tracking-tight md:text-xl">
             Version history
           </SheetTitle>
-          <SheetDescription className="text-[0.8125rem]">
+          <SheetDescription className="text-[0.8125rem] md:text-sm">
             What changed about the reading, newest first.
             {COMMIT ? ` Running build ${COMMIT}.` : " Running a local build."}
           </SheetDescription>

@@ -72,20 +72,20 @@ export function HistorySheet({
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent
         side="bottom"
-        className="safe-bottom flex flex-col overflow-hidden rounded-t-2xl p-0 data-[side=bottom]:h-[86dvh]"
+        className="safe-bottom mx-auto flex flex-col overflow-hidden rounded-t-2xl p-0 data-[side=bottom]:h-[86dvh] md:max-w-2xl md:rounded-t-3xl md:data-[side=bottom]:h-[74dvh]"
       >
-        <SheetHeader className="shrink-0 border-b px-4 py-3.5">
-          <SheetTitle className="font-display text-lg font-extrabold tracking-tight">
+        <SheetHeader className="shrink-0 border-b px-4 py-3.5 md:px-5 md:py-4">
+          <SheetTitle className="font-display text-lg font-extrabold tracking-tight md:text-xl">
             Past scans
           </SheetTitle>
-          <SheetDescription className="text-[0.8125rem]">
+          <SheetDescription className="text-[0.8125rem] md:text-sm">
             Stored on this device only. Nothing is uploaded, and clearing your browser data removes
             them.
           </SheetDescription>
         </SheetHeader>
 
         <ScrollArea className="min-h-0 flex-1">
-          <div className="space-y-2 p-3">
+          <div className="space-y-2 p-3 md:space-y-2.5 md:p-4">
             {records === null ? (
               <>
                 <Skeleton className="h-20 w-full rounded-xl" />
@@ -130,7 +130,7 @@ function Row({
   const healthy = isDemoHealthyHybrid(record.corn_hybrid);
 
   return (
-    <div className="bg-card flex items-stretch gap-3 rounded-xl border p-2.5">
+    <div className="bg-card flex items-stretch gap-3 rounded-xl border p-2.5 md:gap-4 md:p-3">
       <button
         type="button"
         onClick={() => onReopen(record)}
@@ -140,17 +140,17 @@ function Row({
         <img
           src={record.thumbnail}
           alt=""
-          className="bg-muted size-16 shrink-0 rounded-lg object-cover"
+          className="bg-muted size-16 shrink-0 rounded-lg object-cover md:size-20"
         />
         <div className="min-w-0 flex-1">
-          <p className="font-display truncate text-[0.9375rem] leading-tight font-bold">
+          <p className="font-display truncate text-[0.9375rem] leading-tight font-bold md:text-base">
             {healthy ? "Healthy" : record.disease.label}
           </p>
           {/* Date first: it is fixed width, so the hybrid is what truncates. */}
           <p className="text-muted-foreground eyebrow mt-1.5 truncate">
             {record.date} · {record.corn_hybrid || "No hybrid"}
           </p>
-          <p className="text-muted-foreground mt-1 truncate text-[0.8125rem]">
+          <p className="text-muted-foreground mt-1 truncate text-[0.8125rem] md:text-sm">
             {record.location || "No location"}
           </p>
         </div>
@@ -160,7 +160,7 @@ function Row({
           ) : (
             <>
               <span
-                className="tabular font-display text-xl leading-none font-extrabold"
+                className="tabular font-display text-xl leading-none font-extrabold md:text-2xl"
                 style={{ color: BAND_COLOR[band] }}
               >
                 {formatSeverity(record.severity.percent)}
@@ -175,7 +175,7 @@ function Row({
         variant="ghost"
         onClick={() => onDelete(record)}
         aria-label={`Delete the ${healthy ? "Healthy" : record.disease.label} scan from ${record.date}`}
-        className="text-muted-foreground hover:text-destructive size-11 shrink-0 self-center"
+        className="text-muted-foreground hover:text-destructive size-11 shrink-0 self-center md:size-12"
       >
         <Trash2Icon aria-hidden className="size-5" />
       </Button>

@@ -42,7 +42,7 @@ export function FieldNote({
   const locating = placeStatus === "locating" || placeStatus === "naming";
 
   return (
-    <section aria-labelledby="fieldnote-heading" className="space-y-4">
+    <section aria-labelledby="fieldnote-heading" className="space-y-4 md:space-y-5">
       <div className="flex items-center gap-3">
         <h2 id="fieldnote-heading" className="eyebrow text-muted-foreground">
           Field note
@@ -64,7 +64,7 @@ export function FieldNote({
           autoCapitalize="characters"
           spellCheck={false}
           disabled={disabled}
-          className="h-12 rounded-xl text-base"
+          className="h-12 rounded-xl text-base md:h-13 md:text-[1.0625rem]"
         />
       </div>
 
@@ -84,14 +84,14 @@ export function FieldNote({
             placeholder="Field or town"
             autoComplete="off"
             disabled={disabled}
-            className="h-12 flex-1 rounded-xl text-base"
+            className="h-12 flex-1 rounded-xl text-base md:h-13 md:text-[1.0625rem]"
           />
           <Button
             variant="outline"
             onClick={onLocate}
             disabled={disabled || locating}
             aria-label="Use my current location"
-            className="size-12 shrink-0 rounded-xl"
+            className="size-12 shrink-0 rounded-xl md:size-13"
           >
             {locating ? (
               <LoaderCircleIcon aria-hidden className="size-5 animate-spin" />
@@ -101,7 +101,7 @@ export function FieldNote({
           </Button>
         </div>
 
-        <p className="min-h-5 text-[0.8125rem] leading-snug" aria-live="polite">
+        <p className="min-h-5 text-[0.8125rem] leading-snug md:text-sm" aria-live="polite">
           {locating ? (
             <span className="text-muted-foreground">
               {placeStatus === "locating" ? "Getting a fix…" : "Looking up the place name…"}
@@ -137,7 +137,7 @@ export function FieldNote({
           value={date}
           onChange={(e) => onDateChange(e.target.value)}
           disabled={disabled}
-          className="tabular h-12 w-full rounded-xl text-base"
+          className="tabular h-12 w-full rounded-xl text-base md:h-13 md:text-[1.0625rem]"
         />
       </div>
     </section>

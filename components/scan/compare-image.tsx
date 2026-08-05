@@ -111,10 +111,10 @@ export function CompareImage({
               setPos(100);
             }
           }}
-          className="focus-visible:ring-ring absolute top-1/2 grid size-11 -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full border-2 border-white bg-black/55 text-white shadow-lg backdrop-blur-sm focus-visible:ring-4 focus-visible:outline-none"
+          className="focus-visible:ring-ring absolute top-1/2 grid size-11 -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full border-2 border-white bg-black/55 text-white shadow-lg backdrop-blur-sm focus-visible:ring-4 focus-visible:outline-none md:size-12"
           style={{ left: `${pos}%` }}
         >
-          <MoveHorizontalIcon aria-hidden className="size-5" />
+          <MoveHorizontalIcon aria-hidden className="size-5 md:size-6" />
         </div>
 
         <span className="eyebrow pointer-events-none absolute bottom-2 left-2 rounded bg-black/60 px-1.5 py-1 text-white">
@@ -124,7 +124,7 @@ export function CompareImage({
           Photo
         </span>
       </div>
-      <figcaption className="text-muted-foreground mt-2 text-[0.8125rem]">
+      <figcaption className="text-muted-foreground mt-2 text-[0.8125rem] md:text-sm">
         Drag the handle to wipe between the model&rsquo;s lesion mask and your photo.
       </figcaption>
     </figure>
