@@ -83,6 +83,7 @@ export class NetworkError extends Error {
 
 const ERROR_CODES: AnalyzeErrorCode[] = [
   "no_leaf_detected",
+  "unreliable_reading",
   "invalid_image",
   "file_too_large",
   "internal",

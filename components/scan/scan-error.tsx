@@ -42,6 +42,20 @@ const COPY: Record<ScanErrorCode, Copy> = {
     ],
     primary: "retake",
   },
+  // TEMPORARY DEMO GUARD - paired with DEGLS_SEVERITY_GUARD in api/analyze.py.
+  // Fires when severity exceeds the plausibility ceiling, which in practice
+  // means a chlorotic leaf read as heavily diseased. Remove with the guard.
+  unreliable_reading: {
+    icon: LeafIcon,
+    title: "That reading doesn't look trustworthy",
+    body: "The leaf measured as heavily diseased. Uniform yellowing — from nitrogen, drought, or a leaf that's simply old — gets read as lesion tissue, so a very high number is usually that rather than an outbreak.",
+    tips: [
+      "Look at the leaf: scattered spots on green tissue is disease, an evenly pale or yellow blade usually isn't.",
+      "Pick a leaf with distinct lesions and green tissue still around them.",
+      "Lower leaves yellow naturally as the plant matures — try one higher up the stalk.",
+    ],
+    primary: "retake",
+  },
   invalid_image: {
     icon: FileWarningIcon,
     title: "That file couldn't be read",

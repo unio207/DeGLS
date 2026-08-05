@@ -53,6 +53,7 @@ export interface AnalyzeSuccess {
 
 export type AnalyzeErrorCode =
   | "no_leaf_detected"
+  | "unreliable_reading"
   | "invalid_image"
   | "file_too_large"
   | "internal";

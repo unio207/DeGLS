@@ -144,6 +144,32 @@ DEFAULT_PLAUSIBILITY = _env_bool("DEGLS_PLAUSIBILITY", True)
 DEFAULT_MIN_VEG_FRAC = _env_float("DEGLS_MIN_VEG_FRAC", 0.45)
 DEFAULT_MAX_ROUGHNESS = _env_float("DEGLS_MAX_ROUGHNESS", 150.0)
 
+# ---------------------------------------------------------------------------
+# TEMPORARY DEMO GUARD - remove after the 2026-08 field demo.
+#
+# GAUNet segments non-green tissue. A chlorotic leaf (nitrogen deficiency,
+# drought stress, normal lower-leaf senescence) is non-green over its whole
+# area, so the lesion mask balloons and severity reads catastrophically high.
+# Measured 2026-08-04 on 12 reference photos:
+#
+#   yellowing leaves   23.97, 50.41, 59.91, 70.98 %   <- all false positives
+#   real disease        4.50,  7.56,  7.89,  9.90, 27.42 %
+#
+# Nothing above 30% in that set was a true reading, and no true reading reached
+# it. THIS IS A CORRELATION ON n=12, NOT A DISEASE MODEL. A genuinely blighted
+# leaf can exceed 30% and this guard would wrongly suppress it - it is safe only
+# because the demo field has minimal disease, where a high reading is far more
+# likely to be a yellow leaf than an epidemic.
+#
+# Five principled chlorosis/necrosis discriminators were tested and all failed
+# to separate (flagged-pixel L*/a*/b*, boundary sharpness, region-size
+# structure, reference-tissue hue, green fraction). See the design doc.
+#
+# Revert with DEGLS_SEVERITY_GUARD=0 - no code change needed.
+# ---------------------------------------------------------------------------
+DEFAULT_SEVERITY_GUARD = _env_bool("DEGLS_SEVERITY_GUARD", True)
+DEFAULT_MAX_PLAUSIBLE_SEVERITY = _env_float("DEGLS_MAX_PLAUSIBLE_SEVERITY", 30.0)
+
 
 class PipelineError(Exception):
     def __init__(self, code: str, message: str, status: int = 400):
@@ -350,6 +376,8 @@ def analyze(
     plausibility: bool = None,
     min_veg_frac: float = None,
     max_roughness: float = None,
+    severity_guard: bool = None,
+    max_plausible_severity: float = None,
 ) -> Dict[str, Any]:
     threshold = DEFAULT_THRESHOLD if threshold is None else threshold
     tta = DEFAULT_TTA if tta is None else tta
@@ -357,6 +385,12 @@ def analyze(
     plausibility = DEFAULT_PLAUSIBILITY if plausibility is None else plausibility
     min_veg_frac = DEFAULT_MIN_VEG_FRAC if min_veg_frac is None else min_veg_frac
     max_roughness = DEFAULT_MAX_ROUGHNESS if max_roughness is None else max_roughness
+    severity_guard = DEFAULT_SEVERITY_GUARD if severity_guard is None else severity_guard
+    max_plausible_severity = (
+        DEFAULT_MAX_PLAUSIBLE_SEVERITY
+        if max_plausible_severity is None
+        else max_plausible_severity
+    )
 
     t0 = time.perf_counter()
     img = decode_image(raw)
@@ -402,6 +436,17 @@ def analyze(
     lesion = (lesion & top.mask).astype(np.uint8)
 
     percent, lesion_px, leaf_px = compute_severity(top.mask, lesion)
+
+    # TEMPORARY DEMO GUARD - see DEFAULT_SEVERITY_GUARD above.
+    if severity_guard and percent > max_plausible_severity:
+        raise PipelineError(
+            "unreliable_reading",
+            "This leaf reads as heavily diseased, which usually means widespread "
+            "yellowing rather than lesions. Try a leaf with distinct spots on "
+            "otherwise green tissue.",
+            200,
+        )
+
     overlay = build_overlay(segmented, lesion)
 
     return {
