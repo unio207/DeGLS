@@ -21,6 +21,7 @@ export type MockCase =
   | "lowconf"
   | "multi"
   | "no_leaf"
+  | "unreliable_reading"
   | "invalid_image"
   | "file_too_large"
   | "internal";
@@ -37,6 +38,7 @@ export function mockCaseFrom(search: string): MockCase | null {
     "lowconf",
     "multi",
     "no_leaf",
+    "unreliable_reading",
     "invalid_image",
     "file_too_large",
     "internal",
@@ -64,6 +66,16 @@ export async function runMock(kase: MockCase, file: File): Promise<AnalyzeRespon
     return {
       ok: false,
       error: { code: "no_leaf_detected", message: "No corn leaf found in the image." },
+    };
+  }
+  if (kase === "unreliable_reading") {
+    return {
+      ok: false,
+      error: {
+        code: "unreliable_reading",
+        message:
+          "This leaf reads as heavily diseased, which usually means widespread yellowing rather than lesions. Try a leaf with distinct spots on otherwise green tissue.",
+      },
     };
   }
   if (kase === "invalid_image") {
