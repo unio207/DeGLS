@@ -135,6 +135,36 @@ OVERLAY_MAX_EDGE = _env_int("DEGLS_OVERLAY_MAX_EDGE", 1600)
 # anyway (YOLO 640, GAUNet 512).
 WORK_MAX_EDGE = _env_int("DEGLS_WORK_MAX_EDGE", 2048)
 
+# Same cap, lower, for requests that take the leaf mask from SAM.
+#
+# 2048 is not doing any work on this path. SAM resizes to 1024, YOLO letterboxes
+# to 640, GAUNet squashes to 512, so the working image is only ever a staging
+# buffer. Measured over the six field photos (portrait 4284x5712 and 3024x4032,
+# centre point, SAM on), against the 2048 result:
+#
+#   working edge   leaf-mask IoU vs 2048   severity delta   mean wall clock
+#   2048           -                       -                1037 ms
+#   1280           0.990 - 0.996           <= 0.11 pp        997 ms
+#   1024           0.994 - 0.997           <= 0.24 pp        993 ms
+#
+# So it does not change what gets measured. What it changes is the peak numpy
+# heap, and the term that dominates is not the working image itself: YOLO
+# returns 13-23 instances and _yolo_post upsamples EVERY instance mask to the
+# working resolution, so the retained mask list alone was 57-72 MB at 2048
+# against 16-27 MB at 1280. Peak traced allocation over a whole request fell
+# 138 -> 56 MB and 124 -> 77 MB on the two photos profiled.
+#
+# 1280 over 1024 because 1024 buys almost nothing more - 3.5 MB of peak on one
+# photo, 1.3 MB on the other, where the 37-73 MB decode of the source JPEG is
+# already the floor - and the overlay is drawn from this image, so 1024 would
+# shrink the returned overlay by 36% against today's 1600 instead of 20%.
+#
+# Latency is NOT the win here: ~1000 ms of a local SAM request is fixed model
+# cost (SAM 430, GAUNet 330, YOLO 155, all invariant to this number) and only
+# ~40 ms scales with it. The 8161 ms and the two OOM 500s in production are not
+# explained by this, and the SAM encoder's own arena is untouched by it.
+SAM_WORK_MAX_EDGE = _env_int("DEGLS_SAM_WORK_MAX_EDGE", 1280)
+
 # Take the leaf mask from MobileSAM, prompted with a point, instead of from the
 # detector. The detector does not segment leaves: measured across six field
 # photos its top instance covered 22-49% of the frame, swallowing neighbouring
@@ -307,7 +337,7 @@ def decode_image(raw: bytes) -> np.ndarray:
     return img
 
 
-def limit_working_size(img_bgr: np.ndarray) -> np.ndarray:
+def limit_working_size(img_bgr: np.ndarray, max_edge: Optional[int] = None) -> np.ndarray:
     """Cap the longest edge before any processing happens.
 
     A 24.5 Mpx phone photo decodes to 73 MB and every downstream array scales
@@ -323,12 +353,15 @@ def limit_working_size(img_bgr: np.ndarray) -> np.ndarray:
 
     The client shrinks too, but this must not depend on that: the endpoint also
     accepts a raw image/* body, and a server should bound its own memory.
+
+    The SAM path passes SAM_WORK_MAX_EDGE instead; see there.
     """
+    max_edge = WORK_MAX_EDGE if max_edge is None else max_edge
     h, w = img_bgr.shape[:2]
     longest = max(h, w)
-    if longest <= WORK_MAX_EDGE:
+    if longest <= max_edge:
         return img_bgr
-    scale = WORK_MAX_EDGE / float(longest)
+    scale = max_edge / float(longest)
     size = (max(1, int(round(w * scale))), max(1, int(round(h * scale))))
     return cv2.resize(img_bgr, size, interpolation=cv2.INTER_AREA)
 
@@ -608,7 +641,11 @@ def analyze(
     t0 = time.perf_counter()
     img = decode_image(raw)
     source_shape = img.shape[:2]
-    img = limit_working_size(img)
+    # Decided before YOLO runs, because the per-instance mask upsample inside
+    # _yolo_post is the biggest thing that scales with this. A request that asks
+    # for SAM and then falls back to the detector mask stays at the smaller size;
+    # severity is a ratio of two masks at one scale, so that is still correct.
+    img = limit_working_size(img, SAM_WORK_MAX_EDGE if use_sam else WORK_MAX_EDGE)
     h, w = img.shape[:2]
 
     instances = run_yolo(img)
