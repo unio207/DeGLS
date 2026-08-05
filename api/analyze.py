@@ -85,6 +85,11 @@ MODELS_DIR = Path(
 )
 YOLO_ONNX = MODELS_DIR / "yolo.onnx"
 GAUNET_ONNX = MODELS_DIR / "gaunet.onnx"
+SAM_ENCODER_ONNX = MODELS_DIR / "sam_encoder.onnx"
+SAM_DECODER_ONNX = MODELS_DIR / "sam_decoder.onnx"
+
+# MobileSAM (Apache 2.0) works at a fixed 1024 on the long edge.
+SAM_SIZE = 1024
 
 
 def _env_float(name: str, default: float) -> float:
@@ -129,6 +134,26 @@ OVERLAY_MAX_EDGE = _env_int("DEGLS_OVERLAY_MAX_EDGE", 1600)
 # photos; see limit_working_size(). Above ~2000px the models discard the detail
 # anyway (YOLO 640, GAUNet 512).
 WORK_MAX_EDGE = _env_int("DEGLS_WORK_MAX_EDGE", 2048)
+
+# Take the leaf mask from MobileSAM, prompted with a point, instead of from the
+# detector. The detector does not segment leaves: measured across six field
+# photos its top instance covered 22-49% of the frame, swallowing neighbouring
+# blades and weeds, and no better instance existed among the candidates. SAM
+# prompted at the leaf returned 10-21% instead, following the actual blade edge.
+#
+# The point matters. Prompted at the frame centre rather than at the leaf, two
+# of those six came back wrong - one grabbed a narrow strip of a wide blade and
+# pushed severity from 24% to 41% purely by shrinking the denominator. So the
+# tap is the input, and the centre is only a fallback for a caller that sends
+# no point.
+# OFF BY DEFAULT until the memory cost is proven on Vercel, not on a laptop.
+# This function has already been killed once by the 1024 MB limit, and local
+# ru_maxrss is not a usable proxy: it is a process-wide high-water mark and it
+# reports the existing yolo-only path at over 1 GB, which production plainly
+# survives. So the code ships inert and is exercised per-request with ?sam=1
+# against the real container. Flip DEGLS_SAM=1 in the Vercel project settings
+# once that holds - an env var, so no redeploy and an instant rollback.
+DEFAULT_USE_SAM = _env_bool("DEGLS_SAM", False)
 
 # Leaf-plausibility guard.
 #
@@ -225,6 +250,28 @@ def _require(path: Path) -> str:
     return str(path)
 
 
+_sam_encoder: Optional[ort.InferenceSession] = None
+_sam_decoder: Optional[ort.InferenceSession] = None
+
+
+def get_sam_sessions() -> Tuple[ort.InferenceSession, ort.InferenceSession]:
+    """Loaded on first use, not at import.
+
+    Together these are 43 MB of weights that a request with DEGLS_SAM=0 never
+    touches, and the cold start is already paying for yolo + gaunet.
+    """
+    global _sam_encoder, _sam_decoder
+    if _sam_encoder is None:
+        _sam_encoder = ort.InferenceSession(
+            _require(SAM_ENCODER_ONNX), sess_options=_SESS_OPTS, providers=["CPUExecutionProvider"]
+        )
+    if _sam_decoder is None:
+        _sam_decoder = ort.InferenceSession(
+            _require(SAM_DECODER_ONNX), sess_options=_SESS_OPTS, providers=["CPUExecutionProvider"]
+        )
+    return _sam_encoder, _sam_decoder
+
+
 def get_sessions() -> Tuple[ort.InferenceSession, ort.InferenceSession]:
     global _yolo_session, _gaunet_session
     if _yolo_session is None:
@@ -293,6 +340,48 @@ def run_yolo(img_bgr: np.ndarray) -> list:
     return yolo_postprocess(
         out0, out1, orig_shape=img_bgr.shape[:2], lb_shape=(YOLO_IMGSZ, YOLO_IMGSZ), nc=YOLO_NC
     )
+
+
+def sam_leaf_mask(img_bgr: np.ndarray, point: Tuple[float, float]) -> np.ndarray:
+    """Leaf mask from MobileSAM, prompted with one normalised (x, y) point.
+
+    THE PADDING CROP BELOW IS LOAD-BEARING. SAM resizes the long edge to 1024
+    and pads the short edge to a 1024x1024 square. Asking the decoder for a mask
+    at the ORIGINAL size makes it stretch the square straight onto the photo,
+    which slides the mask sideways by the width of the padding - on a portrait
+    photo that put the mask over soil beside the blade while still looking
+    leaf-shaped, so it reads as a bad segmentation rather than a bad transform.
+    Ask for the mask on the padded canvas, cut the padding off, then resize.
+
+    The trailing (0, 0) point labelled -1 is SAM's own padding convention for a
+    prompt with no box; the decoder expects it.
+    """
+    enc, dec = get_sam_sessions()
+    h, w = img_bgr.shape[:2]
+    scale = SAM_SIZE / float(max(h, w))
+    nh, nw = int(round(h * scale)), int(round(w * scale))
+
+    rgb = cv2.cvtColor(
+        cv2.resize(img_bgr, (nw, nh), interpolation=cv2.INTER_AREA), cv2.COLOR_BGR2RGB
+    ).astype(np.float32)
+    embedding = enc.run(None, {"input_image": rgb})[0]
+
+    px = min(max(point[0], 0.0), 1.0) * w * scale
+    py = min(max(point[1], 0.0), 1.0) * h * scale
+    logits = dec.run(
+        None,
+        {
+            "image_embeddings": embedding,
+            "point_coords": np.array([[[px, py], [0.0, 0.0]]], dtype=np.float32),
+            "point_labels": np.array([[1.0, -1.0]], dtype=np.float32),
+            "mask_input": np.zeros((1, 1, 256, 256), dtype=np.float32),
+            "has_mask_input": np.zeros(1, dtype=np.float32),
+            "orig_im_size": np.array([SAM_SIZE, SAM_SIZE], dtype=np.float32),
+        },
+    )[0][0, 0]
+
+    unpadded = logits[:nh, :nw]
+    return (cv2.resize(unpadded, (w, h), interpolation=cv2.INTER_LINEAR) > 0).astype(np.uint8)
 
 
 def leaf_plausibility(img_bgr: np.ndarray, leaf_mask: np.ndarray) -> Tuple[float, float]:
@@ -484,6 +573,8 @@ def analyze(
     severity_guard: bool = None,
     max_plausible_severity: float = None,
     primary_component_only: bool = None,
+    use_sam: bool = None,
+    point: Optional[Tuple[float, float]] = None,
 ) -> Dict[str, Any]:
     threshold = DEFAULT_THRESHOLD if threshold is None else threshold
     tta = DEFAULT_TTA if tta is None else tta
@@ -494,6 +585,7 @@ def analyze(
     primary_component_only = (
         DEFAULT_PRIMARY_COMPONENT if primary_component_only is None else primary_component_only
     )
+    use_sam = DEFAULT_USE_SAM if use_sam is None else use_sam
     severity_guard = DEFAULT_SEVERITY_GUARD if severity_guard is None else severity_guard
     max_plausible_severity = (
         DEFAULT_MAX_PLAUSIBLE_SEVERITY
@@ -528,11 +620,34 @@ def analyze(
 
     # Reduce the instance to its largest contiguous region before anything reads
     # it, so plausibility, severity and the overlay all describe the same leaf.
+    # The detector keeps the class; the mask comes from SAM when it is enabled.
+    # Everything after this point - plausibility, severity, overlay - reads
+    # top.mask, so swapping it here is the whole integration.
+    mask_source = "yolo"
+    if use_sam:
+        try:
+            top = top._replace(mask=sam_leaf_mask(img, point or (0.5, 0.5)))
+            mask_source = "sam_tap" if point else "sam_centre"
+        except PipelineError:
+            raise
+        except Exception:  # noqa: BLE001
+            # A SAM failure must not lose the scan: the detector mask is worse
+            # but it is a real answer, and the demo cannot afford a 500 here.
+            traceback.print_exc()
+            mask_source = "yolo_sam_failed"
+
     mask_components = int(
         cv2.connectedComponentsWithStats(top.mask.astype(np.uint8), connectivity=8)[0] - 1
     )
     if primary_component_only:
         top = top._replace(mask=primary_component(top.mask))
+
+    if int(top.mask.sum()) == 0:
+        raise PipelineError(
+            "no_leaf_detected",
+            "No leaf was found where you tapped. Tap on the blade itself and try again.",
+            200,
+        )
 
     # The detector has no reject class, so a high confidence here means nothing
     # about whether the subject is a leaf at all. Check the pixels directly.
@@ -583,6 +698,7 @@ def analyze(
             "multiple_leaves": len(instances) > 1,
             "source_px": [int(source_shape[1]), int(source_shape[0])],
             "working_px": [int(w), int(h)],
+            "mask_source": mask_source,
             "mask_components": mask_components,
             "primary_component_only": bool(primary_component_only),
             "settings": {
@@ -690,6 +806,17 @@ def _query_overrides(path: str) -> Dict[str, Any]:
             pass
     if "tta" in q:
         out["tta"] = q["tta"][0].lower() in {"1", "true", "yes", "on"}
+    for key, axis in (("px", 0), ("py", 1)):
+        if key in q:
+            try:
+                v = min(max(float(q[key][0]), 0.0), 1.0)
+            except ValueError:
+                continue
+            cur = list(out.get("point") or (0.5, 0.5))
+            cur[axis] = v
+            out["point"] = (cur[0], cur[1])
+    if "sam" in q:
+        out["use_sam"] = q["sam"][0].lower() in {"1", "true", "yes", "on"}
     if "min_blob" in q:
         try:
             out["min_blob"] = max(int(q["min_blob"][0]), 0)
