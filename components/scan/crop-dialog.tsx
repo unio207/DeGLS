@@ -63,12 +63,15 @@ export function CropDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-[min(96vw,32rem)] gap-3 p-4">
+      {/* Wider on a tablet so the crop rectangle is dragged at closer to the
+          photo's own scale — a 28px corner handle on a 300px-wide preview is a
+          much coarser instrument than the same handle on 600px. */}
+      <DialogContent className="max-w-[min(96vw,32rem)] gap-3 p-4 md:max-w-[min(92vw,44rem)] md:gap-4 md:p-5">
         <DialogHeader className="text-left">
-          <DialogTitle className="font-display text-lg font-extrabold tracking-tight">
+          <DialogTitle className="font-display text-lg font-extrabold tracking-tight md:text-xl">
             Crop to the leaf
           </DialogTitle>
-          <DialogDescription className="text-[0.8125rem]">
+          <DialogDescription className="text-[0.8125rem] md:text-sm">
             Drag the corners so the box holds the blade and as little else as possible. Background
             weeds and soil get measured otherwise.
           </DialogDescription>
@@ -213,10 +216,10 @@ function CropBody({
           onPointerMove={onMove}
           onPointerUp={endDrag}
           onPointerCancel={endDrag}
-          className="bg-muted relative max-h-[60dvh] w-full touch-none overflow-hidden rounded-xl select-none"
+          className="bg-muted relative max-h-[60dvh] w-full touch-none overflow-hidden rounded-xl select-none md:max-h-[62dvh]"
         >
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={src} alt="" className="max-h-[60dvh] w-full object-contain" />
+          <img src={src} alt="" className="max-h-[60dvh] w-full object-contain md:max-h-[62dvh]" />
 
           <div
             onPointerDown={(e) => beginDrag(e, "move")}
@@ -243,11 +246,24 @@ function CropBody({
           </div>
         </div>
 
-        <DialogFooter className="gap-2 sm:gap-2">
-          <Button variant="outline" onClick={onClose} className="tap flex-1">
+        {/* DialogFooter is flex-col-reverse below sm, so `flex-1` would apply to
+            the VERTICAL axis and let both buttons shrink. The outline button was
+            saved by .tap's 44px min-height; this one had only h-12, so it
+            collapsed shorter than its neighbour. Full width and shrink-0 while
+            stacked, sharing the row only once the footer turns horizontal. */}
+        <DialogFooter className="gap-2 sm:gap-2 md:-mx-5 md:-mb-5 md:p-5">
+          <Button
+            variant="outline"
+            onClick={onClose}
+            className="h-12 w-full shrink-0 sm:flex-1 md:h-13"
+          >
             Use the whole photo
           </Button>
-          <Button onClick={apply} disabled={busy} className="h-12 flex-1 gap-2 font-semibold">
+          <Button
+            onClick={apply}
+            disabled={busy}
+            className="h-12 w-full shrink-0 gap-2 font-semibold sm:flex-1 md:h-13"
+          >
             <CheckIcon aria-hidden className="size-4" />
             {busy ? "Cropping…" : "Use this crop"}
           </Button>
