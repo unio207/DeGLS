@@ -27,6 +27,14 @@ export interface VersionEntry {
 
 export const VERSIONS: VersionEntry[] = [
   {
+    version: "0.5.0",
+    date: "2026-08-04",
+    notes: [
+      "Fixed full-resolution photos failing outright: the server ran out of memory on large frames, and anything over 4.5 MB was rejected before it arrived.",
+      "Photos are now capped at 2048px on the long edge, on the phone and again on the server.",
+    ],
+  },
+  {
     version: "0.4.0",
     date: "2026-08-04",
     notes: [

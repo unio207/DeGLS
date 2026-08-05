@@ -119,6 +119,17 @@ DEFAULT_TTA = _env_bool("DEGLS_TTA", False)
 # 0 disables. On by default with a small value: single-pixel specks are noise.
 DEFAULT_MIN_BLOB = _env_int("DEGLS_MIN_BLOB", 64)
 
+# Longest edge of the returned overlay image. Not an accuracy setting - the
+# analysis has already happened by the time the overlay is drawn. It exists
+# because rendering it at full resolution cost ~934 MB of peak RSS and produced
+# a 22.9 MB base64 data URI per scan. See build_overlay().
+OVERLAY_MAX_EDGE = _env_int("DEGLS_OVERLAY_MAX_EDGE", 1600)
+
+# Longest edge the pipeline will process. Bounds peak memory on phone-sized
+# photos; see limit_working_size(). Above ~2000px the models discard the detail
+# anyway (YOLO 640, GAUNet 512).
+WORK_MAX_EDGE = _env_int("DEGLS_WORK_MAX_EDGE", 2048)
+
 # Leaf-plausibility guard.
 #
 # The detector was trained on three corn diseases with no background/reject
@@ -247,6 +258,32 @@ def decode_image(raw: bytes) -> np.ndarray:
     if img.ndim != 3 or img.shape[2] != 3:
         raise PipelineError("invalid_image", "Expected a 3-channel colour image.", 400)
     return img
+
+
+def limit_working_size(img_bgr: np.ndarray) -> np.ndarray:
+    """Cap the longest edge before any processing happens.
+
+    A 24.5 Mpx phone photo decodes to 73 MB and every downstream array scales
+    with it - the per-instance mask upsample in _yolo_post alone allocates a
+    float32 at full resolution. Measured peak RSS on one such photo was 1581 MB
+    against Vercel's 1024 MB limit, and production returned 500s with "instance
+    was killed because it ran out of available memory".
+
+    This costs nothing in accuracy. YOLO letterboxes to 640x640 and GAUNet
+    resizes to 512x512, so every pixel above ~2000 on the long edge is thrown
+    away by the models regardless. Severity is a ratio of two masks measured at
+    the same scale, so it is unaffected by the change of denominator.
+
+    The client shrinks too, but this must not depend on that: the endpoint also
+    accepts a raw image/* body, and a server should bound its own memory.
+    """
+    h, w = img_bgr.shape[:2]
+    longest = max(h, w)
+    if longest <= WORK_MAX_EDGE:
+        return img_bgr
+    scale = WORK_MAX_EDGE / float(longest)
+    size = (max(1, int(round(w * scale))), max(1, int(round(h * scale))))
+    return cv2.resize(img_bgr, size, interpolation=cv2.INTER_AREA)
 
 
 def run_yolo(img_bgr: np.ndarray) -> list:
@@ -391,14 +428,41 @@ def compute_severity(leaf_mask: np.ndarray, lesion_mask: np.ndarray) -> Tuple[fl
 def build_overlay(segmented_bgr: np.ndarray, lesion_mask: np.ndarray) -> str:
     """Red lesion overlay on the segmented leaf -> PNG data URI.
 
-    Same look as the legacy overlay_mask_on_image(): 0.9x brightness, red
-    channel at the mask value, alpha 128 inside the mask.
+    Same look as the legacy overlay_mask_on_image(): 0.9x brightness, red at
+    alpha 128 inside the mask.
+
+    MEMORY. The obvious implementation of this killed the function in
+    production. Promoting a 24.5 Mpx image to float32 costs 294 MB per array,
+    and the readable version held three of them plus temporaries: measured peak
+    RSS 1581 MB against Vercel's 1024 MB limit, and the logs read "instance was
+    killed because it ran out of available memory". Small test images never
+    showed it. So:
+
+      * downscale FIRST, before any arithmetic;
+      * stay in uint8, doing the blend as integer math on the lesion pixels
+        only, rather than float32 over the whole frame.
+
+    Downscaling is free in every sense that matters here: the overlay is
+    displayed on a phone, and at full resolution the base64 data URI was 22.9 MB
+    per scan, which then had to travel in the JSON response and be stored in
+    IndexedDB for every history record.
     """
-    dark = (segmented_bgr.astype(np.float32) * 0.9).clip(0, 255)
-    red_bgr = np.zeros_like(dark)
-    red_bgr[:, :, 2] = lesion_mask.astype(np.float32) * 255.0
-    alpha = (lesion_mask.astype(np.float32) * (128.0 / 255.0))[:, :, None]
-    out = (dark * (1 - alpha) + red_bgr * alpha).astype(np.uint8)
+    h, w = segmented_bgr.shape[:2]
+    scale = min(1.0, OVERLAY_MAX_EDGE / float(max(h, w)))
+    if scale < 1.0:
+        size = (max(1, int(round(w * scale))), max(1, int(round(h * scale))))
+        segmented_bgr = cv2.resize(segmented_bgr, size, interpolation=cv2.INTER_AREA)
+        lesion_mask = cv2.resize(lesion_mask, size, interpolation=cv2.INTER_NEAREST)
+
+    out = cv2.convertScaleAbs(segmented_bgr, alpha=0.9)  # uint8 in, uint8 out
+    sel = lesion_mask.astype(bool)
+    if sel.any():
+        # new = dark*(1 - 128/255) + red*(128/255); 127/256 approximates 0.498
+        # closely enough to be indistinguishable, and keeps this in integers.
+        px = out[sel].astype(np.uint16)
+        px = (px * 127) >> 8
+        px[:, 2] = np.minimum(px[:, 2] + 128, 255)
+        out[sel] = px.astype(np.uint8)
 
     ok, buf = cv2.imencode(".png", out)
     if not ok:
@@ -439,6 +503,8 @@ def analyze(
 
     t0 = time.perf_counter()
     img = decode_image(raw)
+    source_shape = img.shape[:2]
+    img = limit_working_size(img)
     h, w = img.shape[:2]
 
     instances = run_yolo(img)
@@ -515,6 +581,8 @@ def analyze(
             "processing_ms": int((time.perf_counter() - t0) * 1000),
             "instances_detected": len(instances),
             "multiple_leaves": len(instances) > 1,
+            "source_px": [int(source_shape[1]), int(source_shape[0])],
+            "working_px": [int(w), int(h)],
             "mask_components": mask_components,
             "primary_component_only": bool(primary_component_only),
             "settings": {

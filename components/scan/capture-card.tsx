@@ -4,15 +4,15 @@ import { useRef, useState } from "react";
 import { CameraIcon, ImageIcon, RefreshCwIcon } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
-import { shrinkToFit } from "@/lib/downscale";
+import { prepareForUpload } from "@/lib/downscale";
 
-// Matches MAX_UPLOAD_BYTES in api/analyze.py. These were 12 MB here and 10 MB
-// there, so an 11 MB photo passed this check and then failed on the server
-// after the whole upload had been sent.
-const MAX_BYTES = 10 * 1024 * 1024;
-// Shrink target, kept under MAX_BYTES so multipart framing can't push the
-// request back over the server's limit.
-const SHRINK_TARGET = 8 * 1024 * 1024;
+// Vercel rejects any function request body over 4.5 MB at the platform edge,
+// before our code runs, with an opaque FUNCTION_PAYLOAD_TOO_LARGE. That is well
+// below api/analyze.py's own 10 MB limit, so the binding constraint is the
+// platform's. Measured: a 5.12 MB upload returns 413 from production.
+const MAX_BYTES = 4 * 1024 * 1024;
+// Target for re-encoding, with headroom under MAX_BYTES for multipart framing.
+const SHRINK_TARGET = 3 * 1024 * 1024;
 
 /**
  * The capture surface.
@@ -43,15 +43,17 @@ export function CaptureCard({
       onReject("That file isn't an image. Pick a JPEG, PNG or HEIC photo.");
       return;
     }
-    // Oversized photos get re-encoded rather than refused. The pipeline works
-    // at 640x640 and 512x512, so this costs the reading nothing.
+    // Every photo goes through this, not just oversized ones: the server runs
+    // out of memory on full-resolution frames regardless of file size, because
+    // what costs memory is pixel count. prepareForUpload returns the original
+    // untouched when it is already small enough in both dimensions and bytes.
+    const prepared = await prepareForUpload(file, SHRINK_TARGET);
+    if (prepared) {
+      onSelect(prepared);
+      return;
+    }
     if (file.size > MAX_BYTES) {
-      const smaller = await shrinkToFit(file, SHRINK_TARGET);
-      if (!smaller) {
-        onReject("That photo is too large and couldn't be resized. Take a new one at a lower resolution.");
-        return;
-      }
-      onSelect(smaller);
+      onReject("That photo is too large and couldn't be resized. Take a new one at a lower resolution.");
       return;
     }
     onSelect(file);

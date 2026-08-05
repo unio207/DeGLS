@@ -27,15 +27,29 @@
  */
 
 /**
- * Progressively smaller re-encodes, first that fits wins. The 1280 floor stays
+ * Every upload is capped at this on the long edge, not just oversized ones.
+ *
+ * This is not a bandwidth nicety. Production returned 500s on full-resolution
+ * photos with "instance was killed because it ran out of available memory": a
+ * 24.5 Mpx frame decodes to 73 MB server-side and peak RSS measured 1776 MB
+ * against Vercel's 1024 MB limit. Files as small as 1.4 MB triggered it, since
+ * what matters is pixel count, not bytes — so a byte-only threshold cannot fix
+ * it and this has to apply unconditionally.
+ *
+ * api/analyze.py enforces the same cap independently (WORK_MAX_EDGE); doing it
+ * here as well keeps the upload small over field signal.
+ */
+const MAX_EDGE = 2048;
+
+/**
+ * Progressively smaller re-encodes, first that fits wins. The 1024 floor stays
  * comfortably above YOLO's 640 input so the detector is never starved.
  */
 const STEPS: ReadonlyArray<{ edge: number; quality: number }> = [
-  { edge: 4096, quality: 0.9 },
-  { edge: 3072, quality: 0.85 },
-  { edge: 2048, quality: 0.85 },
-  { edge: 1600, quality: 0.8 },
-  { edge: 1280, quality: 0.75 },
+  { edge: MAX_EDGE, quality: 0.9 },
+  { edge: 1600, quality: 0.85 },
+  { edge: 1280, quality: 0.8 },
+  { edge: 1024, quality: 0.75 },
 ];
 
 function toJpegName(name: string): string {
@@ -44,13 +58,16 @@ function toJpegName(name: string): string {
 }
 
 /**
- * Re-encode `file` until it fits in `maxBytes`.
+ * Prepare `file` for upload: at most MAX_EDGE on the long side and `maxBytes`
+ * on the wire.
  *
- * Returns null if the image can't be decoded (an HEIC on a browser without
- * support, a corrupt file) or if even the smallest step is still too large —
- * both cases the caller should surface as the ordinary too-large error.
+ * Returns the original file untouched when it already satisfies both, so small
+ * photos are never needlessly re-encoded. Returns null if the image can't be
+ * decoded (an HEIC on a browser without support, a corrupt file) or if even the
+ * smallest step is still too large — the caller surfaces those as the ordinary
+ * too-large error.
  */
-export async function shrinkToFit(file: File, maxBytes: number): Promise<File | null> {
+export async function prepareForUpload(file: File, maxBytes: number): Promise<File | null> {
   let bitmap: ImageBitmap;
   try {
     bitmap = await createImageBitmap(file, { imageOrientation: "from-image" });
@@ -59,6 +76,9 @@ export async function shrinkToFit(file: File, maxBytes: number): Promise<File | 
   }
 
   try {
+    if (Math.max(bitmap.width, bitmap.height) <= MAX_EDGE && file.size <= maxBytes) {
+      return file;
+    }
     for (const { edge, quality } of STEPS) {
       const scale = Math.min(1, edge / Math.max(bitmap.width, bitmap.height));
       const w = Math.max(1, Math.round(bitmap.width * scale));
