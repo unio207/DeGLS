@@ -22,6 +22,7 @@ import { ChatSheet } from "./chat-sheet";
 import { FieldNote } from "./field-note";
 import { HistorySheet } from "./history-sheet";
 import { Masthead } from "./masthead";
+import { CURRENT_VERSION, VersionSheet } from "./version-sheet";
 import { ProgressStages } from "./progress-stages";
 import { ResultPanel, type ResultView } from "./result-panel";
 import { ScanError, type ScanErrorCode } from "./scan-error";
@@ -74,6 +75,7 @@ export function ScanApp() {
   const [errorDetail, setErrorDetail] = useState<string | undefined>();
 
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [versionsOpen, setVersionsOpen] = useState(false);
   const [chatOpen, setChatOpen] = useState(false);
   const [historyCount, setHistoryCount] = useState(0);
 
@@ -308,7 +310,7 @@ export function ScanApp() {
               </p>
             </div>
 
-            <Provenance />
+            <Provenance onOpenVersions={() => setVersionsOpen(true)} />
           </div>
         )}
 
@@ -356,11 +358,12 @@ export function ScanApp() {
         onChanged={refreshCount}
       />
       <ChatSheet open={chatOpen} onOpenChange={setChatOpen} context={context} />
+      <VersionSheet open={versionsOpen} onOpenChange={setVersionsOpen} />
     </>
   );
 }
 
-function Provenance() {
+function Provenance({ onOpenVersions }: { onOpenVersions: () => void }) {
   return (
     <div className="text-muted-foreground border-t pt-5 text-[0.8125rem] leading-relaxed">
       <p className="flex gap-2">
@@ -371,6 +374,14 @@ function Provenance() {
           device.
         </span>
       </p>
+      <button
+        type="button"
+        onClick={onOpenVersions}
+        className="hover:text-foreground mt-3 -mx-1 px-1 py-1 text-[0.75rem] underline underline-offset-2 transition-colors"
+      >
+        Version history
+        <span className="tabular"> · v{CURRENT_VERSION}</span>
+      </button>
     </div>
   );
 }
