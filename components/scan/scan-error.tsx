@@ -30,14 +30,18 @@ interface Copy {
  * not a crash, and the old UI logged it to the console and showed nothing.
  */
 const COPY: Record<ScanErrorCode, Copy> = {
+  // Now reachable two ways: nothing leaf-like in the photo at all, or a tap
+  // that landed on soil or shadow beside the blade. The tap is the cheaper fix
+  // and needs no new photo, so it leads — see onAdjust below, which replaces
+  // the primary action for this code only.
   no_leaf_detected: {
     icon: LeafIcon,
-    title: "No leaf found in that photo",
-    body: "The detector didn't find a corn leaf it could measure. That's almost always framing rather than the plant.",
+    title: "No leaf found where you tapped",
+    body: "Nothing measurable as a corn leaf was found at that point. Either the tap missed the blade, or the photo hasn't got a leaf the detector can read.",
     tips: [
-      "Fill more of the frame — get the blade within about a foot of the lens.",
+      "Tap again, well inside the blade — the middle of it, not an edge, a shadow or the soil behind it.",
+      "If the tap was on the leaf, retake: fill more of the frame, blade within about a foot of the lens.",
       "Hold the leaf flat and shoot square to it, not at a steep angle.",
-      "Step so your own shadow is off the leaf, or shade it evenly with your body.",
       "One leaf at a time against a plain background, not a wall of canopy.",
     ],
     primary: "retake",
@@ -100,11 +104,14 @@ export function ScanError({
   detail,
   onRetake,
   onRetry,
+  onAdjust,
 }: {
   code: ScanErrorCode;
   detail?: string;
   onRetake: () => void;
   onRetry: () => void;
+  /** Back to the photo with the tap marker still on it, to move it. */
+  onAdjust?: () => void;
 }) {
   const copy = COPY[code] ?? COPY.internal;
   const Icon = copy.icon;
@@ -142,7 +149,27 @@ export function ScanError({
         )}
 
         <div className="grid gap-2">
-          {copy.primary === "retake" ? (
+          {onAdjust && code === "no_leaf_detected" ? (
+            // Retrying unchanged would send the identical point and fail the
+            // identical way, so for a missed tap the way out is the photo, not
+            // the network.
+            <>
+              <Button
+                onClick={onAdjust}
+                className="h-14 w-full gap-2.5 rounded-xl text-base font-semibold md:h-15 md:text-lg"
+              >
+                <LeafIcon aria-hidden className="size-5 md:size-6" />
+                Tap a different spot
+              </Button>
+              <Button
+                variant="outline"
+                onClick={onRetake}
+                className="h-12 w-full rounded-xl text-[0.9375rem] md:h-13 md:text-base"
+              >
+                Take another photo
+              </Button>
+            </>
+          ) : copy.primary === "retake" ? (
             <Button
               onClick={onRetake}
               className="h-14 w-full gap-2.5 rounded-xl text-base font-semibold md:h-15 md:text-lg"
@@ -159,13 +186,15 @@ export function ScanError({
               Try again
             </Button>
           )}
-          <Button
-            variant="outline"
-            onClick={copy.primary === "retake" ? onRetry : onRetake}
-            className="h-12 w-full rounded-xl text-[0.9375rem] md:h-13 md:text-base"
-          >
-            {copy.primary === "retake" ? "Send this photo again anyway" : "Take another photo"}
-          </Button>
+          {!(onAdjust && code === "no_leaf_detected") && (
+            <Button
+              variant="outline"
+              onClick={copy.primary === "retake" ? onRetry : onRetake}
+              className="h-12 w-full rounded-xl text-[0.9375rem] md:h-13 md:text-base"
+            >
+              {copy.primary === "retake" ? "Send this photo again anyway" : "Take another photo"}
+            </Button>
+          )}
         </div>
       </div>
     </section>

@@ -37,6 +37,12 @@ export interface AnalyzeMeta {
   instances_detected: number;
   /** True when >1 leaf was detected; severity reflects only the top instance. */
   multiple_leaves: boolean;
+  /**
+   * Which path produced the leaf mask. Diagnostics only — never shown to a
+   * grower, who has no way to act on it. Optional here because history records
+   * and the mock fixtures predate it.
+   */
+  mask_source?: "yolo" | "sam_tap" | "sam_centre" | "yolo_sam_failed";
   settings: {
     threshold: number;
     tta: boolean;
@@ -66,6 +72,17 @@ export interface AnalyzeFailure {
 }
 
 export type AnalyzeResponse = AnalyzeSuccess | AnalyzeFailure;
+
+/**
+ * Where the grower tapped the leaf, in IMAGE space: x = column / imageWidth,
+ * y = row / imageHeight, both 0..1. Normalised rather than in pixels because
+ * prepareForUpload may re-encode the photo at a smaller size between the tap
+ * and the upload, and a fraction survives that untouched.
+ */
+export interface LeafPoint {
+  x: number;
+  y: number;
+}
 
 /** Form fields collected alongside the image upload. */
 export interface ScanInput {

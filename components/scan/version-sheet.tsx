@@ -27,6 +27,13 @@ export interface VersionEntry {
 
 export const VERSIONS: VersionEntry[] = [
   {
+    version: "0.8.0",
+    date: "2026-08-05",
+    notes: [
+      "Tap the leaf in your photo before scanning, so the reading measures the blade you meant and not the weeds behind it.",
+    ],
+  },
+  {
     version: "0.7.0",
     date: "2026-08-05",
     notes: [

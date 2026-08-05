@@ -1,10 +1,12 @@
 "use client";
 
-import type { AnalyzeErrorCode, AnalyzeResponse, ScanInput } from "@/lib/types";
+import type { AnalyzeErrorCode, AnalyzeResponse, LeafPoint, ScanInput } from "@/lib/types";
 
 export interface AnalyzeOptions {
   file: File;
   input: ScanInput;
+  /** Tap on the leaf, 0..1 in image space. Omitted, the server keeps today's behaviour. */
+  point?: LeafPoint | null;
   /** 0–1 of the request body actually written to the wire. */
   onUploadProgress?: (fraction: number) => void;
   signal?: AbortSignal;
@@ -20,6 +22,7 @@ export interface AnalyzeOptions {
 export function analyze({
   file,
   input,
+  point,
   onUploadProgress,
   signal,
 }: AnalyzeOptions): Promise<AnalyzeResponse> {
@@ -30,8 +33,21 @@ export function analyze({
     body.append("location", input.location);
     body.append("date", input.date);
 
+    // `sam=1` travels with the point, not separately: SAM is off by default in
+    // api/analyze.py (DEGLS_SAM) pending a memory check on Vercel, so the flag
+    // is currently the only thing that makes the tap do anything at all.
+    let url = "/api/analyze";
+    if (point) {
+      const q = new URLSearchParams({
+        sam: "1",
+        px: point.x.toFixed(4),
+        py: point.y.toFixed(4),
+      });
+      url += `?${q}`;
+    }
+
     const xhr = new XMLHttpRequest();
-    xhr.open("POST", "/api/analyze");
+    xhr.open("POST", url);
     xhr.responseType = "text";
 
     if (onUploadProgress) {

@@ -5,7 +5,13 @@ import { LeafIcon, ScanLineIcon } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
-import type { AnalyzeSuccess, DiagnosisContext, ScanInput, ScanRecord } from "@/lib/types";
+import type {
+  AnalyzeSuccess,
+  DiagnosisContext,
+  LeafPoint,
+  ScanInput,
+  ScanRecord,
+} from "@/lib/types";
 import {
   QuotaError,
   fileToDataUri,
@@ -18,7 +24,7 @@ import {
   hasConversation,
 } from "@/lib/history";
 import { NetworkError, analyze } from "./analyze";
-import { CaptureCard } from "./capture-card";
+import { CaptureCard, type Tap } from "./capture-card";
 import { ChatSheet } from "./chat-sheet";
 import { FieldNote } from "./field-note";
 import { HistorySheet } from "./history-sheet";
@@ -50,6 +56,14 @@ export function ScanApp() {
 
   const [file, setFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  // Where the grower tapped the leaf. Required before a scan can run: severity
+  // is lesion area over LEAF area, so the point decides the denominator, and
+  // the server's no-point fallback (frame centre) picked the wrong region on 2
+  // of 6 real field photos. Held here rather than in CaptureCard because that
+  // card unmounts while a scan runs, and the marker has to still be there when
+  // a failed scan sends the user back to move it.
+  const [tap, setTap] = useState<Tap | null>(null);
+  const point: LeafPoint | null = tap?.point ?? null;
 
   // The last hybrid used is read straight out of localStorage rather than
   // being copied into state by an effect, so the input never flashes empty on
@@ -134,7 +148,7 @@ export function ScanApp() {
   }
 
   async function submit() {
-    if (!file) return;
+    if (!file || !point) return;
 
     const input: ScanInput = {
       corn_hybrid: hybrid.trim(),
@@ -162,6 +176,7 @@ export function ScanApp() {
         response = await analyze({
           file,
           input,
+          point,
           signal: controller.signal,
           onUploadProgress: (fraction) => {
             setUploadFraction(fraction);
@@ -277,6 +292,7 @@ export function ScanApp() {
     setHasChat(false);
     setFile(null);
     setPreviewUrl(null);
+    setTap(null);
     setUploadFraction(0);
     setUploaded(false);
     window.scrollTo({ top: 0, behavior: "smooth" });
@@ -314,7 +330,10 @@ export function ScanApp() {
           <div className="space-y-7 md:grid md:grid-cols-2 md:items-start md:gap-x-8 md:gap-y-9 md:space-y-0">
             <CaptureCard
               previewUrl={previewUrl}
+              file={file}
               onSelect={selectFile}
+              tap={tap}
+              onTap={setTap}
               onReject={(message) => toast.error("Can't use that file", { description: message })}
             />
 
@@ -339,7 +358,7 @@ export function ScanApp() {
               <div>
                 <Button
                   onClick={submit}
-                  disabled={!file}
+                  disabled={!file || !point}
                   className="h-14 w-full gap-2.5 rounded-xl text-base font-semibold md:h-15 md:text-lg"
                 >
                   <ScanLineIcon aria-hidden className="size-5 md:size-6" />
@@ -349,7 +368,11 @@ export function ScanApp() {
                   className="text-muted-foreground mt-2 min-h-5 text-center text-[0.8125rem] md:text-sm"
                   aria-live="polite"
                 >
-                  {file ? "Takes about 2–5 seconds." : "Add a leaf photo to start."}
+                  {!file
+                    ? "Add a leaf photo to start."
+                    : !point
+                      ? "Tap the leaf in the photo so it measures the right blade."
+                      : "Takes about 2–5 seconds."}
                 </p>
               </div>
             </div>
@@ -387,6 +410,9 @@ export function ScanApp() {
                 detail={errorDetail}
                 onRetake={newScan}
                 onRetry={submit}
+                // Compose still holds the photo and the marker, so this is a
+                // re-tap rather than a restart.
+                onAdjust={() => setPhase("compose")}
               />
             </div>
           )}
