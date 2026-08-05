@@ -36,9 +36,11 @@ export function ChatSheet({
             Management assistant
           </SheetTitle>
           <SheetDescription className="text-[0.8125rem]">
-            {context
-              ? `Answering about ${context.disease_label} at ${formatSeverity(context.severity_percent)}% leaf area${context.corn_hybrid ? ` on ${context.corn_hybrid}` : ""}.`
-              : "Run a scan first."}
+            {!context
+              ? "Run a scan first."
+              : context.unclassified
+                ? `No disease was classified on this scan${context.corn_hybrid ? ` of ${context.corn_hybrid}` : ""}.`
+                : `Answering about ${context.disease_label} at ${formatSeverity(context.severity_percent)}% leaf area${context.corn_hybrid ? ` on ${context.corn_hybrid}` : ""}.`}
           </SheetDescription>
         </SheetHeader>
 

@@ -109,8 +109,9 @@ export function DiagnosisChat({ context }: DiagnosisChatProps) {
         {empty ? (
           <div className="flex h-full flex-col justify-end gap-3">
             <p className="text-muted-foreground text-[0.9375rem] leading-relaxed text-balance">
-              Ask about managing {context.disease_label.toLowerCase()} on this field. Answers cite
-              university extension and Crop Protection Network publications.
+              {context.unclassified
+                ? "Ask about corn leaf disease on this field. Answers cite university extension and Crop Protection Network publications."
+                : `Ask about managing ${context.disease_label.toLowerCase()} on this field. Answers cite university extension and Crop Protection Network publications.`}
             </p>
             <div className="flex flex-col gap-2">
               {suggestions.map((question) => (
@@ -198,7 +199,11 @@ export function DiagnosisChat({ context }: DiagnosisChatProps) {
               }
             }}
             rows={1}
-            placeholder={`Ask about ${context.disease_label.toLowerCase()}…`}
+            placeholder={
+              context.unclassified
+                ? "Ask about corn leaf disease…"
+                : `Ask about ${context.disease_label.toLowerCase()}…`
+            }
             aria-label="Message the management assistant"
             className="max-h-32 min-h-11 flex-1 resize-none rounded-xl py-2.5 text-base"
           />

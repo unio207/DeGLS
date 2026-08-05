@@ -65,11 +65,17 @@ function describeContext(context: DiagnosisContext | undefined): string {
     return "No diagnosis is attached to this conversation. Ask the grower for the disease, severity, and growth stage before giving specific advice.";
   }
 
-  const lines = [
-    `- Disease identified: ${context.disease_label} (model class \`${context.disease_code}\`)`,
-    `- Model confidence: ${(context.confidence * 100).toFixed(0)}%`,
-    `- Lesion severity: ${context.severity_percent.toFixed(1)}% of the analyzed leaf area`,
-  ];
+  const lines = context.unclassified
+    ? [
+        "- The scan did not produce a usable classification. Do NOT name a disease as",
+        "  identified and do NOT quote a severity figure. Answer generally, and ask the",
+        "  grower what they are seeing before giving specific advice.",
+      ]
+    : [
+        `- Disease identified: ${context.disease_label} (model class \`${context.disease_code}\`)`,
+        `- Model confidence: ${(context.confidence * 100).toFixed(0)}%`,
+        `- Lesion severity: ${context.severity_percent.toFixed(1)}% of the analyzed leaf area`,
+      ];
   if (context.corn_hybrid) lines.push(`- Corn hybrid: ${context.corn_hybrid}`);
   if (context.location) lines.push(`- Location: ${context.location}`);
   if (context.date) lines.push(`- Scan date: ${context.date}`);
@@ -223,7 +229,8 @@ export async function POST(req: Request) {
   // Bias retrieval toward the diagnosed disease. "Should I spray?" on its own
   // matches fungicide-timing chunks for every disease in the corpus; prefixing
   // the label pulls the right ones to the top.
-  const retrievalQuery = context ? `${context.disease_label} in corn. ${question}` : question;
+  const retrievalQuery =
+    context && !context.unclassified ? `${context.disease_label} in corn. ${question}` : question;
 
   let chunks: RetrievedChunk[] = [];
   if (isCorpusReady()) {

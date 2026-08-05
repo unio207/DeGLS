@@ -266,6 +266,9 @@ export function ScanApp() {
         disease_code: view.disease.code,
         severity_percent: view.severity.percent,
         confidence: view.disease.confidence,
+        // Temporary demo override — see demo-healthy.ts. Keeps the assistant
+        // from naming a disease the result panel declined to name.
+        unclassified: view.presentAsHealthy === true,
       }
     : null;
 

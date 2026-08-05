@@ -30,7 +30,21 @@ const BY_DISEASE: Record<DiseaseCode, string[]> = {
   ],
 };
 
+/** Used when the scan produced no classification to key the questions off. */
+const UNCLASSIFIED: string[] = [
+  "What are the common corn leaf diseases right now?",
+  "How do I tell gray leaf spot from northern leaf blight?",
+  "What should I look for before deciding to spray?",
+  "How should I photograph a leaf for a better reading?",
+];
+
 export function suggestedQuestions(context: DiagnosisContext): string[] {
+  if (context.unclassified) {
+    const generic = [...UNCLASSIFIED];
+    if (context.corn_hybrid) generic.push(`What should I watch for on ${context.corn_hybrid}?`);
+    return generic.slice(0, 4);
+  }
+
   const base = BY_DISEASE[context.disease_code] ?? BY_DISEASE.corn_gls;
   const questions = [...base];
 

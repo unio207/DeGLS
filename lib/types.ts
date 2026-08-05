@@ -108,6 +108,12 @@ export interface DiagnosisContext extends ScanInput {
   disease_code: DiseaseCode;
   severity_percent: number;
   confidence: number;
+  /**
+   * The scan produced no usable classification, so the assistant must not name
+   * a disease or quote a severity. Currently set only by the temporary demo
+   * override (see components/scan/demo-healthy.ts).
+   */
+  unclassified?: boolean;
 }
 
 export interface ChatCitation {
