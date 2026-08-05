@@ -150,16 +150,24 @@ DEFAULT_MAX_ROUGHNESS = _env_float("DEGLS_MAX_ROUGHNESS", 150.0)
 # GAUNet segments non-green tissue. A chlorotic leaf (nitrogen deficiency,
 # drought stress, normal lower-leaf senescence) is non-green over its whole
 # area, so the lesion mask balloons and severity reads catastrophically high.
-# Measured 2026-08-04 on 12 reference photos:
 #
-#   yellowing leaves   23.97, 50.41, 59.91, 70.98 %   <- all false positives
-#   real disease        4.50,  7.56,  7.89,  9.90, 27.42 %
+# Measured 2026-08-04 across 19 photos (12 reference + the 7 repo fixtures),
+# with primary_component() enabled:
 #
-# Nothing above 30% in that set was a true reading, and no true reading reached
-# it. THIS IS A CORRELATION ON n=12, NOT A DISEASE MODEL. A genuinely blighted
-# leaf can exceed 30% and this guard would wrongly suppress it - it is safe only
+#   diseased leaves   0.08 .. 39.37 %   (top three: 29.19, 30.08, 39.37)
+#   chlorotic/healthy 0.00, 10.54, 23.97, 50.42, 59.91, 70.99 %
+#
+# The separable gap is 39.37 -> 50.42, so the ceiling sits at its midpoint.
+#
+# An earlier version of this used 30.0, chosen against the 12 reference photos
+# alone. That was wrong: fixture IMG_0554 is a diseased leaf reading 39.37% and
+# was being silently suppressed. Widen the sample before touching this number.
+#
+# THIS IS A CORRELATION ON n=19, NOT A DISEASE MODEL. A genuinely blighted leaf
+# can exceed 45% and this guard would wrongly suppress it - it is safe only
 # because the demo field has minimal disease, where a high reading is far more
-# likely to be a yellow leaf than an epidemic.
+# likely to be a yellow leaf than an epidemic. Note it does NOT catch the two
+# false readings that sit below the ceiling (10.54% healthy, 23.97% yellowing).
 #
 # Five principled chlorosis/necrosis discriminators were tested and all failed
 # to separate (flagged-pixel L*/a*/b*, boundary sharpness, region-size
@@ -167,8 +175,13 @@ DEFAULT_MAX_ROUGHNESS = _env_float("DEGLS_MAX_ROUGHNESS", 150.0)
 #
 # Revert with DEGLS_SEVERITY_GUARD=0 - no code change needed.
 # ---------------------------------------------------------------------------
+# Keep only the largest connected region of the chosen instance's mask, so the
+# overlay highlights one leaf rather than speckling weeds and soil. See
+# primary_component() for what this does and does not separate.
+DEFAULT_PRIMARY_COMPONENT = _env_bool("DEGLS_PRIMARY_COMPONENT", True)
+
 DEFAULT_SEVERITY_GUARD = _env_bool("DEGLS_SEVERITY_GUARD", True)
-DEFAULT_MAX_PLAUSIBLE_SEVERITY = _env_float("DEGLS_MAX_PLAUSIBLE_SEVERITY", 30.0)
+DEFAULT_MAX_PLAUSIBLE_SEVERITY = _env_float("DEGLS_MAX_PLAUSIBLE_SEVERITY", 45.0)
 
 
 class PipelineError(Exception):
@@ -272,6 +285,34 @@ def leaf_plausibility(img_bgr: np.ndarray, leaf_mask: np.ndarray) -> Tuple[float
     roughness = float(np.abs(cv2.Laplacian(grey, cv2.CV_32F, ksize=3))[m].mean())
 
     return float(vegetation.mean()), roughness
+
+
+def primary_component(mask: np.ndarray) -> np.ndarray:
+    """Keep only the largest connected region of a leaf mask.
+
+    The detector's top instance is not one leaf. On a field photo it comes back
+    as a foreground blob spanning the target blade plus whatever else is green,
+    broken into many pieces: measured 2026-08-04, 15 components on one photo and
+    16 on another, with the largest holding ~95% of the area and the remainder
+    scattered over weeds and soil away from the leaf.
+
+    Dropping all but the largest component removes those detached fragments, so
+    the overlay highlights one contiguous region instead of speckling the
+    background, and the severity denominator stops counting soil as leaf.
+
+    LIMIT, STATED PLAINLY: this separates *disconnected* regions only. Two corn
+    blades that touch or overlap are a single connected component and stay
+    merged. Nothing here isolates one leaf from another it is resting against.
+
+    Interior holes are deliberately NOT filled. On a multi-leaf photo those holes
+    are background seen between the blades (19-33% of the filled area in the same
+    measurements); filling them would paint weeds as leaf and inflate severity.
+    """
+    n, labels, stats, _ = cv2.connectedComponentsWithStats(mask.astype(np.uint8), connectivity=8)
+    if n <= 2:  # background + at most one region: nothing to drop
+        return mask
+    largest = 1 + int(np.argmax([stats[i, cv2.CC_STAT_AREA] for i in range(1, n)]))
+    return (labels == largest).astype(np.uint8)
 
 
 def apply_leaf_mask(img_bgr: np.ndarray, leaf_mask: np.ndarray) -> np.ndarray:
@@ -378,6 +419,7 @@ def analyze(
     max_roughness: float = None,
     severity_guard: bool = None,
     max_plausible_severity: float = None,
+    primary_component_only: bool = None,
 ) -> Dict[str, Any]:
     threshold = DEFAULT_THRESHOLD if threshold is None else threshold
     tta = DEFAULT_TTA if tta is None else tta
@@ -385,6 +427,9 @@ def analyze(
     plausibility = DEFAULT_PLAUSIBILITY if plausibility is None else plausibility
     min_veg_frac = DEFAULT_MIN_VEG_FRAC if min_veg_frac is None else min_veg_frac
     max_roughness = DEFAULT_MAX_ROUGHNESS if max_roughness is None else max_roughness
+    primary_component_only = (
+        DEFAULT_PRIMARY_COMPONENT if primary_component_only is None else primary_component_only
+    )
     severity_guard = DEFAULT_SEVERITY_GUARD if severity_guard is None else severity_guard
     max_plausible_severity = (
         DEFAULT_MAX_PLAUSIBLE_SEVERITY
@@ -414,6 +459,14 @@ def analyze(
     # Both are fixed by taking the single highest-confidence instance.
     top = instances[0]  # postprocess() returns confidence-sorted instances
     code = CLASS_NAMES.get(top.cls_id, str(top.cls_id))
+
+    # Reduce the instance to its largest contiguous region before anything reads
+    # it, so plausibility, severity and the overlay all describe the same leaf.
+    mask_components = int(
+        cv2.connectedComponentsWithStats(top.mask.astype(np.uint8), connectivity=8)[0] - 1
+    )
+    if primary_component_only:
+        top = top._replace(mask=primary_component(top.mask))
 
     # The detector has no reject class, so a high confidence here means nothing
     # about whether the subject is a leaf at all. Check the pixels directly.
@@ -462,6 +515,8 @@ def analyze(
             "processing_ms": int((time.perf_counter() - t0) * 1000),
             "instances_detected": len(instances),
             "multiple_leaves": len(instances) > 1,
+            "mask_components": mask_components,
+            "primary_component_only": bool(primary_component_only),
             "settings": {
                 "threshold": threshold,
                 "tta": bool(tta),
