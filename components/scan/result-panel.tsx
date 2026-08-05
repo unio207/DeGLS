@@ -5,6 +5,7 @@ import { CameraIcon, LayersIcon, MessageSquareIcon, TriangleAlertIcon } from "lu
 import { Button } from "@/components/ui/button";
 import type { AnalyzeMeta, DiseaseResult, ScanInput, SeverityResult } from "@/lib/types";
 import { CompareImage } from "./compare-image";
+import { DEMO_HEALTHY_TEXT } from "./demo-healthy";
 import { SeverityGauge } from "./severity-gauge";
 import { LOW_CONFIDENCE, formatConfidence } from "./severity-scale";
 
@@ -18,6 +19,8 @@ export interface ResultView {
   meta: AnalyzeMeta | null;
   /** Epoch ms, for records read back out of history. */
   recordedAt?: number;
+  /** Temporary demo override — see demo-healthy.ts. Remove after the demo. */
+  presentAsHealthy?: boolean;
 }
 
 export function ResultPanel({
@@ -30,7 +33,15 @@ export function ResultPanel({
   onNewScan: () => void;
 }) {
   const { disease, severity, overlay, original, input, meta } = view;
-  const lowConfidence = disease.confidence < LOW_CONFIDENCE;
+
+  // Temporary demo override (see demo-healthy.ts). Everything that would name a
+  // disease or put a number on the severity is suppressed together — a healthy
+  // headline over a confidence score and a lesion pixel count would read as a
+  // bug. Remove this line and its uses below after the demo.
+  const healthy = view.presentAsHealthy === true;
+
+  const lowConfidence = !healthy && disease.confidence < LOW_CONFIDENCE;
+  const imageAlt = healthy ? "The scanned corn leaf" : `${disease.label} on a corn leaf`;
 
   return (
     <section aria-live="polite" aria-labelledby="result-heading" className="animate-rise space-y-5">
@@ -46,15 +57,17 @@ export function ResultPanel({
             id="result-heading"
             className="font-display mt-1.5 text-[1.75rem] leading-[1.05] font-extrabold tracking-tight text-balance"
           >
-            {disease.label}
+            {healthy ? "Healthy" : disease.label}
           </h2>
-          <p className="text-muted-foreground eyebrow tabular mt-2">
-            Detection confidence {formatConfidence(disease.confidence)}
-          </p>
+          {!healthy && (
+            <p className="text-muted-foreground eyebrow tabular mt-2">
+              Detection confidence {formatConfidence(disease.confidence)}
+            </p>
+          )}
         </div>
 
         <div className="p-4">
-          <SeverityGauge percent={severity.percent} />
+          {healthy ? <HealthyReadout /> : <SeverityGauge percent={severity.percent} />}
         </div>
       </div>
 
@@ -76,7 +89,7 @@ export function ResultPanel({
         </div>
       )}
 
-      {meta?.multiple_leaves && (
+      {!healthy && meta?.multiple_leaves && (
         <div
           className="bg-secondary text-secondary-foreground flex gap-3 rounded-xl p-3.5"
           role="note"
@@ -99,7 +112,7 @@ export function ResultPanel({
           <CompareImage
             original={original}
             overlay={overlay}
-            alt={`${disease.label} on a corn leaf`}
+            alt={imageAlt}
           />
         ) : (
           <figure className="m-0">
@@ -107,7 +120,7 @@ export function ResultPanel({
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
                 src={overlay}
-                alt={`Lesion overlay for ${disease.label}`}
+                alt={healthy ? "Overlay for the scanned corn leaf" : `Lesion overlay for ${disease.label}`}
                 className="h-full w-full object-contain"
               />
             </div>
@@ -123,12 +136,14 @@ export function ResultPanel({
         <Fact label="Hybrid" value={input.corn_hybrid || "Not recorded"} />
         <Fact label="Date" value={input.date || "Not recorded"} mono />
         <Fact label="Location" value={input.location || "Not recorded"} span />
-        <Fact
-          label="Lesion / leaf pixels"
-          value={`${severity.lesion_px.toLocaleString()} / ${severity.leaf_px.toLocaleString()}`}
-          mono
-          span
-        />
+        {!healthy && (
+          <Fact
+            label="Lesion / leaf pixels"
+            value={`${severity.lesion_px.toLocaleString()} / ${severity.leaf_px.toLocaleString()}`}
+            mono
+            span
+          />
+        )}
         {meta && (
           <>
             <Fact label="Processing" value={`${(meta.processing_ms / 1000).toFixed(1)}s`} mono />
@@ -154,6 +169,24 @@ export function ResultPanel({
           Scan another leaf
         </Button>
       </div>
+    </section>
+  );
+}
+
+/**
+ * Stands in for the gauge under the demo override (see demo-healthy.ts). Keeps
+ * the gauge's header row so the card's rhythm does not change, with the message
+ * sitting where the big number would. Remove after the demo.
+ */
+function HealthyReadout() {
+  return (
+    <section aria-labelledby="severity-heading" className="space-y-3">
+      <h3 id="severity-heading" className="eyebrow text-muted-foreground">
+        Leaf area with lesions
+      </h3>
+      <p className="font-display text-[1.25rem] leading-tight font-bold text-balance">
+        {DEMO_HEALTHY_TEXT}
+      </p>
     </section>
   );
 }

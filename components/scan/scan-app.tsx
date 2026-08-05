@@ -26,6 +26,7 @@ import { CURRENT_VERSION, VersionSheet } from "./version-sheet";
 import { ProgressStages } from "./progress-stages";
 import { ResultPanel, type ResultView } from "./result-panel";
 import { ScanError, type ScanErrorCode } from "./scan-error";
+import { isDemoHealthyHybrid } from "./demo-healthy";
 import { mockCaseFrom, runMock } from "./mock";
 import { usePlace, type Fix } from "./use-place";
 
@@ -182,6 +183,8 @@ export function ScanApp() {
       original,
       input,
       meta: response.meta,
+      // Temporary demo override — see demo-healthy.ts. Remove after the demo.
+      presentAsHealthy: isDemoHealthyHybrid(input.corn_hybrid),
     });
     setPhase("result");
     rememberHybrid(input.corn_hybrid);
@@ -238,6 +241,9 @@ export function ScanApp() {
       },
       meta: null,
       recordedAt: record.created_at,
+      // Same temporary demo override, so reopening the scan from history shows
+      // what the live scan showed. See demo-healthy.ts; remove after the demo.
+      presentAsHealthy: isDemoHealthyHybrid(record.corn_hybrid),
     });
     setPhase("result");
   }

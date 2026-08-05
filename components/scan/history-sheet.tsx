@@ -17,6 +17,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import type { ScanRecord } from "@/lib/types";
 import { deleteScan, listScans } from "@/lib/history";
 import { BAND_COLOR, BAND_LABEL, bandOf, formatSeverity } from "./severity-scale";
+import { isDemoHealthyHybrid } from "./demo-healthy";
 
 /**
  * Past scans, from this device only. Nothing here has ever left the phone, and
@@ -123,6 +124,10 @@ function Row({
   onDelete: (record: ScanRecord) => void;
 }) {
   const band = bandOf(record.severity.percent);
+  // Temporary demo override — see demo-healthy.ts. Recomputed from the stored
+  // hybrid rather than persisted, so the list agrees with the result panel.
+  // Remove after the demo.
+  const healthy = isDemoHealthyHybrid(record.corn_hybrid);
 
   return (
     <div className="bg-card flex items-stretch gap-3 rounded-xl border p-2.5">
@@ -139,7 +144,7 @@ function Row({
         />
         <div className="min-w-0 flex-1">
           <p className="font-display truncate text-[0.9375rem] leading-tight font-bold">
-            {record.disease.label}
+            {healthy ? "Healthy" : record.disease.label}
           </p>
           {/* Date first: it is fixed width, so the hybrid is what truncates. */}
           <p className="text-muted-foreground eyebrow mt-1.5 truncate">
@@ -150,20 +155,26 @@ function Row({
           </p>
         </div>
         <div className="shrink-0 text-right">
-          <span
-            className="tabular font-display text-xl leading-none font-extrabold"
-            style={{ color: BAND_COLOR[band] }}
-          >
-            {formatSeverity(record.severity.percent)}
-            <span className="text-xs font-semibold">%</span>
-          </span>
-          <p className="eyebrow text-muted-foreground mt-1.5">{BAND_LABEL[band]}</p>
+          {healthy ? (
+            <span className="text-muted-foreground eyebrow">Not classified</span>
+          ) : (
+            <>
+              <span
+                className="tabular font-display text-xl leading-none font-extrabold"
+                style={{ color: BAND_COLOR[band] }}
+              >
+                {formatSeverity(record.severity.percent)}
+                <span className="text-xs font-semibold">%</span>
+              </span>
+              <p className="eyebrow text-muted-foreground mt-1.5">{BAND_LABEL[band]}</p>
+            </>
+          )}
         </div>
       </button>
       <Button
         variant="ghost"
         onClick={() => onDelete(record)}
-        aria-label={`Delete the ${record.disease.label} scan from ${record.date}`}
+        aria-label={`Delete the ${healthy ? "Healthy" : record.disease.label} scan from ${record.date}`}
         className="text-muted-foreground hover:text-destructive size-11 shrink-0 self-center"
       >
         <Trash2Icon aria-hidden className="size-5" />
