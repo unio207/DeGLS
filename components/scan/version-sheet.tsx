@@ -27,6 +27,13 @@ export interface VersionEntry {
 
 export const VERSIONS: VersionEntry[] = [
   {
+    version: "0.6.0",
+    date: "2026-08-05",
+    notes: [
+      "Added a crop tool: trim the photo to the leaf before scanning, so background weeds and soil are not measured.",
+    ],
+  },
+  {
     version: "0.5.0",
     date: "2026-08-04",
     notes: [

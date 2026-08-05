@@ -1,10 +1,11 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { CameraIcon, ImageIcon, RefreshCwIcon } from "lucide-react";
+import { CameraIcon, CropIcon, ImageIcon, RefreshCwIcon } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { prepareForUpload } from "@/lib/downscale";
+import { CropDialog } from "./crop-dialog";
 
 // Vercel rejects any function request body over 4.5 MB at the platform edge,
 // before our code runs, with an opaque FUNCTION_PAYLOAD_TOO_LARGE. That is well
@@ -36,6 +37,10 @@ export function CaptureCard({
   const cameraRef = useRef<HTMLInputElement>(null);
   const libraryRef = useRef<HTMLInputElement>(null);
   const [dragging, setDragging] = useState(false);
+  // The photo as picked, kept so the crop dialog works on the best copy we
+  // have rather than on the already-downscaled upload.
+  const [picked, setPicked] = useState<File | null>(null);
+  const [cropOpen, setCropOpen] = useState(false);
 
   async function accept(file: File | undefined | null) {
     if (!file) return;
@@ -43,6 +48,8 @@ export function CaptureCard({
       onReject("That file isn't an image. Pick a JPEG, PNG or HEIC photo.");
       return;
     }
+    setPicked(file);
+
     // Every photo goes through this, not just oversized ones: the server runs
     // out of memory on full-resolution frames regardless of file size, because
     // what costs memory is pixel count. prepareForUpload returns the original
@@ -89,15 +96,26 @@ export function CaptureCard({
               alt="The leaf photo you selected"
               className="absolute inset-0 h-full w-full object-cover"
             />
-            <Button
-              variant="outline"
-              onClick={() => cameraRef.current?.click()}
-              disabled={disabled}
-              className="tap absolute right-3 bottom-3 gap-2 px-3 shadow-md"
-            >
-              <RefreshCwIcon aria-hidden />
-              Retake
-            </Button>
+            <div className="absolute right-3 bottom-3 flex gap-2">
+              <Button
+                variant="outline"
+                onClick={() => setCropOpen(true)}
+                disabled={disabled || !picked}
+                className="tap gap-2 px-3 shadow-md"
+              >
+                <CropIcon aria-hidden />
+                Crop
+              </Button>
+              <Button
+                variant="outline"
+                onClick={() => cameraRef.current?.click()}
+                disabled={disabled}
+                className="tap gap-2 px-3 shadow-md"
+              >
+                <RefreshCwIcon aria-hidden />
+                Retake
+              </Button>
+            </div>
           </>
         ) : (
           <div className="absolute inset-0 grid place-items-center px-6 text-center">
@@ -161,6 +179,13 @@ export function CaptureCard({
           void accept(e.target.files?.[0]);
           e.target.value = "";
         }}
+      />
+
+      <CropDialog
+        open={cropOpen}
+        onOpenChange={setCropOpen}
+        file={picked}
+        onCropped={(cropped) => void accept(cropped)}
       />
     </section>
   );
