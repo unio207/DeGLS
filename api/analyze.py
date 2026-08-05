@@ -346,12 +346,23 @@ def sam_leaf_mask(img_bgr: np.ndarray, point: Tuple[float, float]) -> np.ndarray
     """Leaf mask from MobileSAM, prompted with one normalised (x, y) point.
 
     THE PADDING CROP BELOW IS LOAD-BEARING. SAM resizes the long edge to 1024
-    and pads the short edge to a 1024x1024 square. Asking the decoder for a mask
-    at the ORIGINAL size makes it stretch the square straight onto the photo,
-    which slides the mask sideways by the width of the padding - on a portrait
-    photo that put the mask over soil beside the blade while still looking
-    leaf-shaped, so it reads as a bad segmentation rather than a bad transform.
-    Ask for the mask on the padded canvas, cut the padding off, then resize.
+    and pads the short edge to a 1024x1024 square (the encoder does the padding
+    itself: its graph is Sub/Div by the ImageNet mean/std in 0-255 units, then a
+    bottom-right Pad to 1024x1024, so raw 0-255 HWC input is correct).
+
+    DO NOT USE THE DECODER'S `masks` OUTPUT. Its unpadding crop is a constant
+    baked in at export time - the graph slices axis 2 to [0:683] and axis 3 to
+    [0:1024] no matter what `orig_im_size` says, because it was traced on a
+    1024x683 image. Every other aspect ratio therefore comes back stretched
+    vertically by 1024/683 = 1.5x: a same-shape leaf sitting in the wrong place.
+    Measured against synthetic rectangles of known bounds, centroid off by
+    +231 px on 768x1024 and +909 px on 3024x4032, IoU with truth 0.00-0.36 on
+    every aspect ratio tested, square included.
+
+    `low_res_masks` is the raw 256x256 logit field, untouched by that
+    postprocess, so do the unpadding here: upsample to the padded canvas, cut
+    the padding off, then resize to the image. Same synthetic test: IoU
+    0.98-1.00, sub-pixel centroid error.
 
     The trailing (0, 0) point labelled -1 is SAM's own padding convention for a
     prompt with no box; the decoder expects it.
@@ -368,8 +379,8 @@ def sam_leaf_mask(img_bgr: np.ndarray, point: Tuple[float, float]) -> np.ndarray
 
     px = min(max(point[0], 0.0), 1.0) * w * scale
     py = min(max(point[1], 0.0), 1.0) * h * scale
-    logits = dec.run(
-        None,
+    low_res = dec.run(
+        ["low_res_masks"],  # skip `masks`: its export-time unpadding crop is wrong (above)
         {
             "image_embeddings": embedding,
             "point_coords": np.array([[[px, py], [0.0, 0.0]]], dtype=np.float32),
@@ -380,7 +391,8 @@ def sam_leaf_mask(img_bgr: np.ndarray, point: Tuple[float, float]) -> np.ndarray
         },
     )[0][0, 0]
 
-    unpadded = logits[:nh, :nw]
+    canvas = cv2.resize(low_res, (SAM_SIZE, SAM_SIZE), interpolation=cv2.INTER_LINEAR)
+    unpadded = canvas[:nh, :nw]
     return (cv2.resize(unpadded, (w, h), interpolation=cv2.INTER_LINEAR) > 0).astype(np.uint8)
 
 
