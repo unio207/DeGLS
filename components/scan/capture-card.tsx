@@ -4,8 +4,15 @@ import { useRef, useState } from "react";
 import { CameraIcon, ImageIcon, RefreshCwIcon } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { shrinkToFit } from "@/lib/downscale";
 
-const MAX_BYTES = 12 * 1024 * 1024;
+// Matches MAX_UPLOAD_BYTES in api/analyze.py. These were 12 MB here and 10 MB
+// there, so an 11 MB photo passed this check and then failed on the server
+// after the whole upload had been sent.
+const MAX_BYTES = 10 * 1024 * 1024;
+// Shrink target, kept under MAX_BYTES so multipart framing can't push the
+// request back over the server's limit.
+const SHRINK_TARGET = 8 * 1024 * 1024;
 
 /**
  * The capture surface.
@@ -30,14 +37,21 @@ export function CaptureCard({
   const libraryRef = useRef<HTMLInputElement>(null);
   const [dragging, setDragging] = useState(false);
 
-  function accept(file: File | undefined | null) {
+  async function accept(file: File | undefined | null) {
     if (!file) return;
     if (!file.type.startsWith("image/")) {
       onReject("That file isn't an image. Pick a JPEG, PNG or HEIC photo.");
       return;
     }
+    // Oversized photos get re-encoded rather than refused. The pipeline works
+    // at 640x640 and 512x512, so this costs the reading nothing.
     if (file.size > MAX_BYTES) {
-      onReject("That photo is over 12 MB. Take a new one at a lower resolution.");
+      const smaller = await shrinkToFit(file, SHRINK_TARGET);
+      if (!smaller) {
+        onReject("That photo is too large and couldn't be resized. Take a new one at a lower resolution.");
+        return;
+      }
+      onSelect(smaller);
       return;
     }
     onSelect(file);
@@ -58,7 +72,7 @@ export function CaptureCard({
         onDrop={(e) => {
           e.preventDefault();
           setDragging(false);
-          accept(e.dataTransfer.files?.[0]);
+          void accept(e.dataTransfer.files?.[0]);
         }}
         className={[
           "relative aspect-[4/5] w-full overflow-hidden rounded-2xl border-2 border-dashed transition-colors",
@@ -130,7 +144,7 @@ export function CaptureCard({
         tabIndex={-1}
         aria-hidden
         onChange={(e) => {
-          accept(e.target.files?.[0]);
+          void accept(e.target.files?.[0]);
           e.target.value = "";
         }}
       />
@@ -142,7 +156,7 @@ export function CaptureCard({
         tabIndex={-1}
         aria-hidden
         onChange={(e) => {
-          accept(e.target.files?.[0]);
+          void accept(e.target.files?.[0]);
           e.target.value = "";
         }}
       />
