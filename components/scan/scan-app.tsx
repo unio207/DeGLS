@@ -15,6 +15,7 @@ import {
   rememberHybrid,
   saveScan,
   listScans,
+  hasConversation,
 } from "@/lib/history";
 import { NetworkError, analyze } from "./analyze";
 import { CaptureCard } from "./capture-card";
@@ -22,6 +23,7 @@ import { ChatSheet } from "./chat-sheet";
 import { FieldNote } from "./field-note";
 import { HistorySheet } from "./history-sheet";
 import { Masthead } from "./masthead";
+import { MapSheet } from "./map-sheet";
 import { CURRENT_VERSION, VersionSheet } from "./version-sheet";
 import { ProgressStages } from "./progress-stages";
 import { ResultPanel, type ResultView } from "./result-panel";
@@ -72,12 +74,23 @@ export function ScanApp() {
   const [uploaded, setUploaded] = useState(false);
 
   const [view, setView] = useState<ResultView | null>(null);
+  // The id of the ScanRecord the on-screen result belongs to. The chat thread
+  // is keyed to it, so it is minted before the record is written rather than
+  // inside saveScan. Whether that scan already has a chat behind it — for
+  // labelling the entry point "Continue chatting" — is `hasConversation(scanId)`
+  // from lib/history.
+  const [scanId, setScanId] = useState<string | null>(null);
   const [errorCode, setErrorCode] = useState<ScanErrorCode>("internal");
   const [errorDetail, setErrorDetail] = useState<string | undefined>();
 
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [mapOpen, setMapOpen] = useState(false);
   const [versionsOpen, setVersionsOpen] = useState(false);
   const [chatOpen, setChatOpen] = useState(false);
+  // Drives the "Continue chatting" label. Refreshed when a scan is opened and
+  // again when the chat sheet closes, which is the only moment the answer can
+  // have changed while the result is on screen.
+  const [hasChat, setHasChat] = useState(false);
   const [historyCount, setHistoryCount] = useState(0);
 
   const place = usePlace();
@@ -175,6 +188,9 @@ export function ScanApp() {
 
   async function showResult(response: AnalyzeSuccess, input: ScanInput) {
     const original = await fileToDataUri(file!).catch(() => null);
+    const id = newId();
+    setScanId(id);
+    setHasChat(false);
 
     setView({
       disease: response.disease,
@@ -195,7 +211,7 @@ export function ScanApp() {
       const thumbnail = await makeThumbnail(response.images.overlay);
       const record: ScanRecord = {
         ...input,
-        id: newId(),
+        id,
         created_at: Date.now(),
         disease: response.disease,
         severity: response.severity,
@@ -229,6 +245,11 @@ export function ScanApp() {
 
   function reopen(record: ScanRecord) {
     setHistoryOpen(false);
+    setScanId(record.id);
+    setHasChat(false);
+    hasConversation(record.id)
+      .then(setHasChat)
+      .catch(() => setHasChat(false));
     setView({
       disease: record.disease,
       severity: record.severity,
@@ -252,6 +273,8 @@ export function ScanApp() {
     abortRef.current?.abort();
     setPhase("compose");
     setView(null);
+    setScanId(null);
+    setHasChat(false);
     setFile(null);
     setPreviewUrl(null);
     setUploadFraction(0);
@@ -274,58 +297,72 @@ export function ScanApp() {
 
   return (
     <>
-      <Masthead onOpenHistory={() => setHistoryOpen(true)} historyCount={historyCount} />
+      <Masthead
+        onOpenHistory={() => setHistoryOpen(true)}
+        onOpenMap={() => setMapOpen(true)}
+        historyCount={historyCount}
+      />
 
-      <main className="safe-x safe-bottom mx-auto w-full max-w-2xl px-4 pt-5 pb-16">
+      {/* Below md this is the phone column it has always been. From 768px — iPad
+          mini portrait, the narrowest tablet we are asked to serve — it splits
+          in two. Widening the single column instead would put a 4:5 leaf frame
+          at 976px across and 1220px tall on a 12.9", which is worse than the
+          stranded column it replaces: the photo and the field note stop being
+          on screen together, which is the whole point of the compose step. */}
+      <main className="safe-x safe-bottom mx-auto w-full max-w-2xl [--safe-x:1rem] pt-5 pb-16 md:max-w-5xl md:[--safe-x:1.5rem] md:pt-8 md:pb-20">
         {phase === "compose" && (
-          <div className="space-y-7">
+          <div className="space-y-7 md:grid md:grid-cols-2 md:items-start md:gap-x-8 md:gap-y-9 md:space-y-0">
             <CaptureCard
               previewUrl={previewUrl}
               onSelect={selectFile}
               onReject={(message) => toast.error("Can't use that file", { description: message })}
             />
 
-            <FieldNote
-              hybrid={hybrid}
-              onHybridChange={setHybrid}
-              location={location}
-              onLocationChange={setLocation}
-              fix={fix}
-              onClearFix={() => {
-                setFix(null);
-                place.reset();
-              }}
-              date={date}
-              onDateChange={setDate}
-              onLocate={locate}
-              placeStatus={place.status}
-              placeMessage={place.message}
-            />
+            <div className="space-y-7">
+              <FieldNote
+                hybrid={hybrid}
+                onHybridChange={setHybrid}
+                location={location}
+                onLocationChange={setLocation}
+                fix={fix}
+                onClearFix={() => {
+                  setFix(null);
+                  place.reset();
+                }}
+                date={date}
+                onDateChange={setDate}
+                onLocate={locate}
+                placeStatus={place.status}
+                placeMessage={place.message}
+              />
 
-            <div>
-              <Button
-                onClick={submit}
-                disabled={!file}
-                className="h-14 w-full gap-2.5 rounded-xl text-base font-semibold"
-              >
-                <ScanLineIcon aria-hidden className="size-5" />
-                Assess severity
-              </Button>
-              <p
-                className="text-muted-foreground mt-2 min-h-5 text-center text-[0.8125rem]"
-                aria-live="polite"
-              >
-                {file ? "Takes about 2–5 seconds." : "Add a leaf photo to start."}
-              </p>
+              <div>
+                <Button
+                  onClick={submit}
+                  disabled={!file}
+                  className="h-14 w-full gap-2.5 rounded-xl text-base font-semibold md:h-15 md:text-lg"
+                >
+                  <ScanLineIcon aria-hidden className="size-5 md:size-6" />
+                  Assess severity
+                </Button>
+                <p
+                  className="text-muted-foreground mt-2 min-h-5 text-center text-[0.8125rem] md:text-sm"
+                  aria-live="polite"
+                >
+                  {file ? "Takes about 2–5 seconds." : "Add a leaf photo to start."}
+                </p>
+              </div>
             </div>
 
-            <Provenance onOpenVersions={() => setVersionsOpen(true)} />
+            <div className="md:col-span-2">
+              <Provenance onOpenVersions={() => setVersionsOpen(true)} />
+            </div>
           </div>
         )}
 
-        <div ref={resultRef} className="scroll-mt-20">
+        <div ref={resultRef} className="scroll-mt-20 md:scroll-mt-24">
           {phase === "working" && (
-            <div className="space-y-4">
+            <div className="space-y-4 md:grid md:grid-cols-2 md:items-start md:gap-6 md:space-y-0">
               {previewUrl && (
                 <div className="bg-muted relative aspect-[4/5] w-full overflow-hidden rounded-2xl">
                   {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -342,23 +379,30 @@ export function ScanApp() {
           )}
 
           {phase === "error" && (
-            <ScanError
-              code={errorCode}
-              detail={errorDetail}
-              onRetake={newScan}
-              onRetry={submit}
-            />
+            // One card of prose and a short list — it does not want 976px, and
+            // splitting instructions into columns would break their order.
+            <div className="md:mx-auto md:max-w-2xl">
+              <ScanError
+                code={errorCode}
+                detail={errorDetail}
+                onRetake={newScan}
+                onRetry={submit}
+              />
+            </div>
           )}
 
           {phase === "result" && view && (
             <ResultPanel
               view={view}
               onAskAssistant={() => setChatOpen(true)}
+              hasConversation={hasChat}
               onNewScan={newScan}
             />
           )}
         </div>
       </main>
+
+      <MapSheet open={mapOpen} onOpenChange={setMapOpen} onReopen={reopen} />
 
       <HistorySheet
         open={historyOpen}
@@ -366,7 +410,19 @@ export function ScanApp() {
         onReopen={reopen}
         onChanged={refreshCount}
       />
-      <ChatSheet open={chatOpen} onOpenChange={setChatOpen} context={context} />
+      <ChatSheet
+        open={chatOpen}
+        onOpenChange={(open) => {
+          setChatOpen(open);
+          if (!open && scanId) {
+            hasConversation(scanId)
+              .then(setHasChat)
+              .catch(() => setHasChat(false));
+          }
+        }}
+        context={context}
+        scanId={scanId}
+      />
       <VersionSheet open={versionsOpen} onOpenChange={setVersionsOpen} />
     </>
   );
@@ -374,7 +430,9 @@ export function ScanApp() {
 
 function Provenance({ onOpenVersions }: { onOpenVersions: () => void }) {
   return (
-    <div className="text-muted-foreground border-t pt-5 text-[0.8125rem] leading-relaxed">
+    // Capped in ch, not by the grid: spanning both columns keeps it out of the
+    // action's way, but 976px of 13px prose is an unreadable measure.
+    <div className="text-muted-foreground border-t pt-5 text-[0.8125rem] leading-relaxed md:max-w-[72ch] md:text-sm">
       <p className="flex gap-2">
         <LeafIcon aria-hidden className="mt-0.5 size-4 shrink-0" />
         <span>

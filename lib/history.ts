@@ -8,11 +8,15 @@
  * the same record but read lazily when a scan is reopened.
  */
 
-import type { ScanRecord } from "@/lib/types";
+import type { ConversationRecord, DiagnosisUIMessage, ScanRecord } from "@/lib/types";
 
 const DB_NAME = "degls";
-const DB_VERSION = 1;
+// v2 adds the `conversations` store. Existing v1 databases upgrade in place —
+// scans are untouched and there is nothing to backfill, since no conversation
+// was ever persisted before this version.
+const DB_VERSION = 2;
 const STORE = "scans";
+const CONVERSATIONS = "conversations";
 const HYBRID_KEY = "degls.last-hybrid";
 
 export class QuotaError extends Error {
@@ -48,6 +52,9 @@ function openDb(): Promise<IDBDatabase> {
           const store = db.createObjectStore(STORE, { keyPath: "id" });
           store.createIndex("created_at", "created_at");
         }
+        if (!db.objectStoreNames.contains(CONVERSATIONS)) {
+          db.createObjectStore(CONVERSATIONS, { keyPath: "scan_id" });
+        }
       };
       req.onsuccess = () => resolve(req.result);
       req.onerror = () => reject(req.error ?? new Error("Could not open the history database."));
@@ -61,6 +68,7 @@ function openDb(): Promise<IDBDatabase> {
 }
 
 function tx<T>(
+  storeName: string,
   mode: IDBTransactionMode,
   run: (store: IDBObjectStore) => IDBRequest<T>,
 ): Promise<T> {
@@ -69,12 +77,12 @@ function tx<T>(
       new Promise<T>((resolve, reject) => {
         let transaction: IDBTransaction;
         try {
-          transaction = db.transaction(STORE, mode);
+          transaction = db.transaction(storeName, mode);
         } catch (err) {
           reject(err);
           return;
         }
-        const request = run(transaction.objectStore(STORE));
+        const request = run(transaction.objectStore(storeName));
         request.onsuccess = () => resolve(request.result);
         transaction.onerror = () => {
           const err = transaction.error ?? request.error;
@@ -90,12 +98,12 @@ function tx<T>(
 
 /** Newest first. Thumbnails only — `overlay` is stripped to keep the list light. */
 export async function listScans(limit = 60): Promise<ScanRecord[]> {
-  const all = await tx<ScanRecord[]>("readonly", (store) => store.getAll() as IDBRequest<ScanRecord[]>);
+  const all = await tx<ScanRecord[]>(STORE, "readonly", (store) => store.getAll() as IDBRequest<ScanRecord[]>);
   return all.sort((a, b) => b.created_at - a.created_at).slice(0, limit);
 }
 
 export async function getScan(id: string): Promise<ScanRecord | undefined> {
-  return tx<ScanRecord | undefined>("readonly", (store) => store.get(id) as IDBRequest<ScanRecord | undefined>);
+  return tx<ScanRecord | undefined>(STORE, "readonly", (store) => store.get(id) as IDBRequest<ScanRecord | undefined>);
 }
 
 /**
@@ -104,7 +112,7 @@ export async function getScan(id: string): Promise<ScanRecord | undefined> {
  */
 export async function saveScan(record: ScanRecord): Promise<void> {
   try {
-    await tx("readwrite", (store) => store.put(record) as IDBRequest<IDBValidKey>);
+    await tx(STORE, "readwrite", (store) => store.put(record) as IDBRequest<IDBValidKey>);
     return;
   } catch (err) {
     if (!(err instanceof QuotaError)) throw err;
@@ -119,15 +127,80 @@ export async function saveScan(record: ScanRecord): Promise<void> {
       /* best effort */
     }
   }
-  await tx("readwrite", (store) => store.put(record) as IDBRequest<IDBValidKey>);
+  await tx(STORE, "readwrite", (store) => store.put(record) as IDBRequest<IDBValidKey>);
 }
 
 export async function deleteScan(id: string): Promise<void> {
-  await tx("readwrite", (store) => store.delete(id) as IDBRequest<undefined>);
+  await tx(STORE, "readwrite", (store) => store.delete(id) as IDBRequest<undefined>);
+  // A conversation with no scan behind it is unreachable, so it goes with it.
+  await deleteConversation(id).catch(() => {});
 }
 
 export async function clearScans(): Promise<void> {
-  await tx("readwrite", (store) => store.clear() as IDBRequest<undefined>);
+  await tx(STORE, "readwrite", (store) => store.clear() as IDBRequest<undefined>);
+  await tx(CONVERSATIONS, "readwrite", (store) => store.clear() as IDBRequest<undefined>);
+}
+
+/* ---------------------------------------------------------------- chat ---- */
+
+/** The saved thread for a scan, or `undefined` if the grower never asked anything. */
+export async function getConversation(scanId: string): Promise<ConversationRecord | undefined> {
+  return tx<ConversationRecord | undefined>(
+    CONVERSATIONS,
+    "readonly",
+    (store) => store.get(scanId) as IDBRequest<ConversationRecord | undefined>,
+  );
+}
+
+/**
+ * Whether a scan already has a chat behind it.
+ *
+ * Callers use this to label the entry point — "Ask about managing this" the
+ * first time, "Continue chatting" once there is something to return to.
+ */
+export async function hasConversation(scanId: string): Promise<boolean> {
+  try {
+    const record = await getConversation(scanId);
+    return (record?.messages.length ?? 0) > 0;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Writes the whole thread for a scan. Called after each completed turn, so the
+ * put is idempotent and the last write wins.
+ *
+ * On a quota failure it drops the oldest turns and retries once: losing the top
+ * of a long conversation is better than losing the reply just generated.
+ */
+export async function saveConversation(
+  scanId: string,
+  messages: DiagnosisUIMessage[],
+): Promise<void> {
+  const write = (msgs: DiagnosisUIMessage[]) =>
+    tx(
+      CONVERSATIONS,
+      "readwrite",
+      (store) =>
+        store.put({
+          scan_id: scanId,
+          updated_at: Date.now(),
+          messages: msgs,
+        } satisfies ConversationRecord) as IDBRequest<IDBValidKey>,
+    );
+
+  try {
+    await write(messages);
+    return;
+  } catch (err) {
+    if (!(err instanceof QuotaError) || messages.length <= 4) throw err;
+  }
+  await write(messages.slice(-4));
+}
+
+export async function deleteConversation(scanId: string): Promise<void> {
+  await tx(CONVERSATIONS, "readwrite", (store) => store.delete(scanId) as IDBRequest<undefined>);
 }
 
 /**

@@ -10,8 +10,10 @@ import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import type { ChatCitation, DiagnosisContext } from "@/lib/types";
 
+import { saveConversation } from "@/lib/history";
+
 import { AssistantMarkdown } from "./markdown";
-import { suggestedQuestions } from "./suggestions";
+import { followUpQuestions, suggestedQuestions } from "./suggestions";
 import type { DiagnosisUIMessage } from "./types";
 
 /**
@@ -23,6 +25,10 @@ import type { DiagnosisUIMessage } from "./types";
  */
 export interface DiagnosisChatProps {
   context: DiagnosisContext;
+  /** `ScanRecord.id` the thread is saved against. Null when the scan wasn't stored. */
+  scanId: string | null;
+  /** Thread restored from IndexedDB. Read once, at mount — see the note below. */
+  initialMessages?: DiagnosisUIMessage[];
 }
 
 function textOf(message: DiagnosisUIMessage): string {
@@ -64,17 +70,31 @@ function SourceList({ citations }: { citations: ChatCitation[] }) {
   );
 }
 
-export function DiagnosisChat({ context }: DiagnosisChatProps) {
+export function DiagnosisChat({ context, scanId, initialMessages }: DiagnosisChatProps) {
   const [input, setInput] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   const transport = useMemo(() => new DefaultChatTransport({ api: "/api/chat" }), []);
+  // `messages` in ChatInit seeds the Chat instance at construction and is
+  // ignored afterwards (see AbstractChat in node_modules/ai), so the restored
+  // thread has to be resolved before this component mounts. chat-sheet.tsx
+  // does the IndexedDB read and remounts on a new scanId.
   const { messages, sendMessage, status, error, stop, regenerate } = useChat<DiagnosisUIMessage>({
     transport,
+    messages: initialMessages,
   });
 
   const busy = status === "submitted" || status === "streaming";
+
+  // Persist after every settled turn rather than only on unmount: the sheet can
+  // be dismissed by a swipe, a back gesture, or the tab being killed outright.
+  useEffect(() => {
+    if (!scanId || busy || messages.length === 0) return;
+    void saveConversation(scanId, messages).catch(() => {
+      /* the conversation on screen is still good; a lost write is not worth a toast */
+    });
+  }, [scanId, busy, messages]);
 
   // Stick to the bottom while tokens arrive, unless the grower has scrolled up
   // to re-read something.
@@ -100,31 +120,27 @@ export function DiagnosisChat({ context }: DiagnosisChatProps) {
     [busy, context, sendMessage],
   );
 
-  const suggestions = suggestedQuestions(context);
   const empty = messages.length === 0;
+
+  // Chips stay available all the way down the thread, not just on the empty
+  // state — testers wanted the recommendations "lined up like how it is at the
+  // start". Anything already asked is filtered out inside followUpQuestions.
+  const asked = messages.filter((m) => m.role === "user").map(textOf);
+  const lastMessage = messages[messages.length - 1];
+  const answered = !busy && !error && lastMessage?.role === "assistant" && textOf(lastMessage) !== "";
+  const followUps = answered ? followUpQuestions(context, asked) : [];
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-4">
+      <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-4 md:px-5">
         {empty ? (
           <div className="flex h-full flex-col justify-end gap-3">
             <p className="text-muted-foreground text-[0.9375rem] leading-relaxed text-balance">
               {context.unclassified
-                ? "Ask about corn leaf disease on this field. Answers cite university extension and Crop Protection Network publications."
-                : `Ask about managing ${context.disease_label.toLowerCase()} on this field. Answers cite university extension and Crop Protection Network publications.`}
+                ? "Ask anything about this field."
+                : `Ask anything about managing ${context.disease_label.toLowerCase()}.`}
             </p>
-            <div className="flex flex-col gap-2">
-              {suggestions.map((question) => (
-                <button
-                  key={question}
-                  type="button"
-                  onClick={() => submit(question)}
-                  className="bg-card hover:bg-accent active:bg-accent min-h-11 rounded-xl border px-3.5 py-2.5 text-left text-[0.9375rem] leading-snug transition-colors"
-                >
-                  {question}
-                </button>
-              ))}
-            </div>
+            <Chips questions={suggestedQuestions(context)} onPick={submit} />
           </div>
         ) : (
           <div className="space-y-5">
@@ -156,10 +172,16 @@ export function DiagnosisChat({ context }: DiagnosisChatProps) {
 
             {status === "submitted" ? <ThinkingDots /> : null}
 
+            {followUps.length > 0 ? <Chips questions={followUps} onPick={submit} /> : null}
+
             {error ? (
               <div className="border-destructive/40 bg-destructive/8 rounded-xl border px-3.5 py-3">
+                {/* Never render error.message: useChat sets it from the raw
+                    response body, which for a server fault is a JSON blob
+                    naming environment variables. A grower cannot act on that,
+                    and it should not be on screen in front of anyone. */}
                 <p className="text-[0.875rem] leading-snug">
-                  {error.message || "Something went wrong reaching the assistant."}
+                  That didn&rsquo;t go through. Try again.
                 </p>
                 <Button
                   variant="outline"
@@ -179,7 +201,7 @@ export function DiagnosisChat({ context }: DiagnosisChatProps) {
       </div>
 
       <form
-        className="bg-background shrink-0 border-t px-3 py-3"
+        className="bg-background shrink-0 border-t px-3 py-3 md:px-4"
         onSubmit={(event) => {
           event.preventDefault();
           submit(input);
@@ -205,7 +227,7 @@ export function DiagnosisChat({ context }: DiagnosisChatProps) {
                 : `Ask about ${context.disease_label.toLowerCase()}…`
             }
             aria-label="Message the management assistant"
-            className="max-h-32 min-h-11 flex-1 resize-none rounded-xl py-2.5 text-base"
+            className="max-h-32 min-h-11 flex-1 resize-none rounded-xl py-2.5 text-base md:min-h-12 md:py-3"
           />
           {busy ? (
             <Button
@@ -214,7 +236,7 @@ export function DiagnosisChat({ context }: DiagnosisChatProps) {
               variant="secondary"
               onClick={() => stop()}
               aria-label="Stop generating"
-              className="size-11 shrink-0 rounded-xl"
+              className="size-11 shrink-0 rounded-xl md:size-12"
             >
               <Square className="size-4 fill-current" aria-hidden />
             </Button>
@@ -224,13 +246,37 @@ export function DiagnosisChat({ context }: DiagnosisChatProps) {
               size="icon"
               disabled={!input.trim()}
               aria-label="Send"
-              className={cn("size-11 shrink-0 rounded-xl")}
+              className={cn("size-11 shrink-0 rounded-xl md:size-12")}
             >
               <ArrowUp className="size-5" aria-hidden />
             </Button>
           )}
         </div>
       </form>
+    </div>
+  );
+}
+
+/** Tappable prompts. One per line so the whole question is readable at a glance. */
+function Chips({
+  questions,
+  onPick,
+}: {
+  questions: string[];
+  onPick: (question: string) => void;
+}) {
+  return (
+    <div className="flex flex-col items-start gap-2">
+      {questions.map((question) => (
+        <button
+          key={question}
+          type="button"
+          onClick={() => onPick(question)}
+          className="bg-card hover:bg-accent active:bg-accent min-h-11 rounded-xl border px-3.5 py-2.5 text-left text-[0.9375rem] leading-snug transition-colors md:min-h-12 md:text-base"
+        >
+          {question}
+        </button>
+      ))}
     </div>
   );
 }

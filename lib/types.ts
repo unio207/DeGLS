@@ -6,6 +6,8 @@
  * shape, change it here first.
  */
 
+import type { UIMessage } from "ai";
+
 /** Class codes emitted by the YOLOv8s-seg model (nc=3). */
 export type DiseaseCode = "corn_gls" | "corn_nlb" | "corn_rust";
 
@@ -121,4 +123,36 @@ export interface ChatCitation {
   title: string;
   /** Public URL of the source publication, when known. */
   url?: string;
+}
+
+/**
+ * Per-message metadata streamed from the chat route.
+ *
+ * Citations are attached at the `start` part rather than parsed out of the
+ * model's text: retrieval has already happened by then, so the UI can render
+ * the source list immediately and it cannot drift from what was actually
+ * retrieved. `citations` is empty when nothing was retrieved, and the UI then
+ * renders no source area at all.
+ */
+export interface ChatMessageMetadata {
+  citations?: ChatCitation[];
+  /** False when the answer came from the diagnosis alone (no corpus hits). */
+  grounded?: boolean;
+}
+
+export type DiagnosisUIMessage = UIMessage<ChatMessageMetadata>;
+
+/**
+ * A chat thread, keyed to the scan it is about.
+ *
+ * Held in its own IndexedDB store rather than on `ScanRecord` because the
+ * record carries a full-size overlay data URI: rewriting all of it on every
+ * chat message would be a multi-megabyte write per turn.
+ */
+export interface ConversationRecord {
+  /** `ScanRecord.id` of the scan this conversation belongs to. */
+  scan_id: string;
+  /** Epoch ms of the last message saved. */
+  updated_at: number;
+  messages: DiagnosisUIMessage[];
 }
