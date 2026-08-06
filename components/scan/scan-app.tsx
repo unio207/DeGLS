@@ -37,7 +37,7 @@ import { CURRENT_VERSION, VersionSheet } from "./version-sheet";
 import { ProgressStages } from "./progress-stages";
 import { ResultPanel, type ResultView } from "./result-panel";
 import { ScanError, type ScanErrorCode } from "./scan-error";
-import { isDemoHealthyHybrid } from "./demo-healthy";
+import { applyDemoDisease, isDemoHealthyHybrid } from "./demo-healthy";
 import { mockCaseFrom, runMock } from "./mock";
 import { usePlace, type Fix } from "./use-place";
 
@@ -386,8 +386,13 @@ export function ScanApp() {
     setScanId(id);
     setHasChat(false);
 
+    // Temporary demo override — see demo-healthy.ts. Substituted once, here,
+    // so the view and the record below carry the same call and every reader
+    // downstream (history, map, the assistant) needs no knowledge of it.
+    const disease = applyDemoDisease(input.corn_hybrid, response.disease);
+
     setView({
-      disease: response.disease,
+      disease,
       severity: response.severity,
       overlay: response.images.overlay,
       segmented,
@@ -408,7 +413,7 @@ export function ScanApp() {
         ...input,
         id,
         created_at: Date.now(),
-        disease: response.disease,
+        disease,
         severity: response.severity,
         thumbnail,
         overlay: response.images.overlay,
