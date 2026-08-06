@@ -39,6 +39,8 @@ export interface CorpusSource {
   url?: string;
   author?: string;
   date?: string;
+  /** Date the source page was fetched and transcribed, for traceability. */
+  retrieved?: string;
   crop?: string;
   disease?: string[];
   /** Originating file in `corpus/`, for debugging. */
@@ -66,6 +68,7 @@ interface StoredChunk {
     url?: string;
     author?: string;
     date?: string;
+    retrieved?: string;
     crop?: string;
     disease?: string[];
   };

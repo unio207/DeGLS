@@ -21,7 +21,8 @@ Response: see RESPONSE CONTRACT below.
     {"ok": true,
      "disease": {"code": "corn_gls", "label": "Gray Leaf Spot", "confidence": 0.94},
      "severity": {"percent": 12.4, "lesion_px": 15320, "leaf_px": 123456},
-     "images": {"overlay": "data:image/png;base64,..."},
+     "images": {"overlay": "data:image/png;base64,...",
+                "leaf_cutout": "data:image/png;base64,..."},
      "meta": {"processing_ms": 1840, "instances_detected": 2,
               "multiple_leaves": true,
               "settings": {"threshold": 0.8, "tta": false, "min_blob": 64}}}
@@ -131,8 +132,8 @@ DEFAULT_MIN_BLOB = _env_int("DEGLS_MIN_BLOB", 64)
 OVERLAY_MAX_EDGE = _env_int("DEGLS_OVERLAY_MAX_EDGE", 1600)
 
 # Longest edge the pipeline will process. Bounds peak memory on phone-sized
-# photos; see limit_working_size(). Above ~2000px the models discard the detail
-# anyway (YOLO 640, GAUNet 512).
+# photos; see limit_working_size() - which also documents why this cap is not
+# accuracy-neutral for GAUNet, whatever the classifier and the leaf mask do.
 WORK_MAX_EDGE = _env_int("DEGLS_WORK_MAX_EDGE", 2048)
 
 # Same cap, lower, for requests that take the leaf mask from SAM.
@@ -147,7 +148,14 @@ WORK_MAX_EDGE = _env_int("DEGLS_WORK_MAX_EDGE", 2048)
 #   1280           0.990 - 0.996           <= 0.11 pp        997 ms
 #   1024           0.994 - 0.997           <= 0.24 pp        993 ms
 #
-# So it does not change what gets measured. What it changes is the peak numpy
+# Those deltas were re-measured later and hold (<= 0.19 pp over the same six).
+# But do not read them as "downscaling is free" - that generalisation is false.
+# 2048 and 1280 agree because BOTH are already far below native on a 5712 px
+# photo (f = 0.22 vs 0.145), and GAUNet's lesion output is already saturated
+# low by then. Across the full range the same photo moves 12.51 -> 2.64;
+# see limit_working_size(). This pair is safe; the principle is not.
+#
+# What the cap changes is the peak numpy
 # heap, and the term that dominates is not the working image itself: YOLO
 # returns 13-23 instances and _yolo_post upsamples EVERY instance mask to the
 # working resolution, so the retained mask list alone was 57-72 MB at 2048
@@ -251,11 +259,27 @@ DEFAULT_MAX_PLAUSIBLE_SEVERITY = _env_float("DEGLS_MAX_PLAUSIBLE_SEVERITY", 45.0
 
 
 class PipelineError(Exception):
-    def __init__(self, code: str, message: str, status: int = 400):
+    """`code` picks the UI copy; `diag` and `reason` are for whoever debugs it.
+
+    The UI buckets several distinct faults into one screen (everything below is
+    `internal` to a grower), so the diag code is what tells the developer which
+    stage actually failed when someone reads it out over the phone.
+    """
+
+    def __init__(
+        self,
+        code: str,
+        message: str,
+        status: int = 400,
+        diag: str = "DG-SRV-UNSPECIFIED",
+        reason: Optional[str] = None,
+    ):
         super().__init__(message)
         self.code = code
         self.message = message
         self.status = status
+        self.diag = diag
+        self.reason = reason or message
 
 
 # ---------------------------------------------------------------------------
@@ -276,6 +300,8 @@ def _require(path: Path) -> str:
             f"Model weights missing at {path}. Run scripts/export_onnx.py, and make sure "
             f"vercel.json includeFiles bundles models/*.onnx with the function.",
             500,
+            "DG-MODEL-MISSING",
+            f"_require(): {path.name} is not in the deployed bundle.",
         )
     return str(path)
 
@@ -331,9 +357,21 @@ def decode_image(raw: bytes) -> np.ndarray:
     arr = np.frombuffer(raw, dtype=np.uint8)
     img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
     if img is None:
-        raise PipelineError("invalid_image", "Could not decode the uploaded image.", 400)
+        raise PipelineError(
+            "invalid_image",
+            "Could not decode the uploaded image.",
+            400,
+            "DG-IMG-DECODE",
+            "decode_image(): cv2.imdecode returned None - bytes are not a readable image.",
+        )
     if img.ndim != 3 or img.shape[2] != 3:
-        raise PipelineError("invalid_image", "Expected a 3-channel colour image.", 400)
+        raise PipelineError(
+            "invalid_image",
+            "Expected a 3-channel colour image.",
+            400,
+            "DG-IMG-CHANNELS",
+            f"decode_image(): decoded array is {img.shape}, expected HxWx3.",
+        )
     return img
 
 
@@ -346,10 +384,28 @@ def limit_working_size(img_bgr: np.ndarray, max_edge: Optional[int] = None) -> n
     against Vercel's 1024 MB limit, and production returned 500s with "instance
     was killed because it ran out of available memory".
 
-    This costs nothing in accuracy. YOLO letterboxes to 640x640 and GAUNet
-    resizes to 512x512, so every pixel above ~2000 on the long edge is thrown
-    away by the models regardless. Severity is a ratio of two masks measured at
-    the same scale, so it is unaffected by the change of denominator.
+    This is NOT free in accuracy, contrary to what this comment used to claim.
+    The old reasoning was that YOLO letterboxes to 640x640 and GAUNet resizes to
+    512x512, so pixels above ~2000 on the long edge are discarded anyway, and
+    that severity is a ratio of two masks at the same scale. The first half is
+    true of the classifier and of the leaf mask; it is false of GAUNet's lesion
+    output, which is a strong monotonic function of how many source pixels span
+    the blade. Measured on IMG_1771, same photo and same leaf mask, varying only
+    the source-pixels-per-input-pixel ratio f:
+
+        f     1.00   0.75   0.50   0.34   0.25   0.145
+        sev  12.51  10.83   7.74   5.73   3.87    2.64
+
+    A 5712 px photo capped to 1280 and then squashed to 512 leaves a blade about
+    135 px wide, so a 25 px rust fleck lands on 3 px and falls under min_blob.
+    Both masks do scale together, so the ratio argument holds - but the lesion
+    mask itself shrinks faster than the leaf, which the ratio cannot recover.
+
+    The consequence to keep in mind: reported severity depends on how far the
+    photo was downscaled. Raising the cap does not fix this either, because at
+    native resolution GAUNet reads chlorotic tissue as lesion (one field photo
+    went to 60% on intact yellow-green blade). Scale invariance and chlorosis
+    discrimination have to be solved together or not at all.
 
     The client shrinks too, but this must not depend on that: the endpoint also
     accepts a raw image/* body, and a server should bound its own memory.
@@ -555,7 +611,13 @@ def compute_severity(leaf_mask: np.ndarray, lesion_mask: np.ndarray) -> Tuple[fl
     leaf_px = int(leaf.sum())
     lesion_px = int(lesion.sum())
     if leaf_px == 0:
-        raise PipelineError("no_leaf_detected", "The detected leaf region is empty.", 200)
+        raise PipelineError(
+            "no_leaf_detected",
+            "The detected leaf region is empty.",
+            200,
+            "DG-LEAF-EMPTY",
+            "compute_severity(): leaf mask has 0 pixels, severity is undefined.",
+        )
     return round(lesion_px / leaf_px * 100.0, 2), lesion_px, leaf_px
 
 
@@ -600,7 +662,62 @@ def build_overlay(segmented_bgr: np.ndarray, lesion_mask: np.ndarray) -> str:
 
     ok, buf = cv2.imencode(".png", out)
     if not ok:
-        raise PipelineError("internal", "Failed to encode the overlay image.", 500)
+        raise PipelineError(
+            "internal",
+            "Failed to encode the overlay image.",
+            500,
+            "DG-OVERLAY-ENCODE",
+            "build_overlay(): cv2.imencode('.png') failed.",
+        )
+    return "data:image/png;base64," + base64.b64encode(buf.tobytes()).decode("ascii")
+
+
+# Black at alpha 26 leaves 1 - 26/255 = 0.898 of the original through, which is
+# build_overlay()'s 0.9x darkening to within half a level of one channel.
+_CUTOUT_LEAF_ALPHA = 26
+
+
+def build_leaf_cutout(leaf_mask: np.ndarray) -> str:
+    """Leaf mask -> a transparent PNG the client can lay straight over the photo.
+
+    The overlay build_overlay() returns is one flattened picture: leaf on black,
+    with the red lesion mask painted into the same pixels. Anything that wants
+    the segmentation WITHOUT the lesions therefore cannot be cut out of it, and
+    returning a second full-colour overlay is not affordable - the first one is
+    already ~2 MB of base64 in the response, and the function runs against a
+    1024 MB cap it has been killed by before.
+
+    So this returns the mask alone, as the thinnest thing that can carry it: a
+    BGRA PNG that is opaque black outside the leaf and near-transparent black
+    inside it. All three colour channels are zero, so the only entropy in the
+    file is the alpha plane's two values, and PNG's filters flatten that to a
+    few kilobytes: measured 1.7-19.4 kB of base64 across the eighteen test
+    photos, 0.3-8% of the overlay beside it, and 0-3 ms to encode.
+
+    Composited over the original photo it reproduces build_overlay() minus the
+    lesion pass exactly: the background goes to black, the blade keeps its 0.9x.
+    Sized and downscaled the same way as the overlay so the two are
+    interchangeable in the same frame.
+    """
+    h, w = leaf_mask.shape[:2]
+    scale = min(1.0, OVERLAY_MAX_EDGE / float(max(h, w)))
+    if scale < 1.0:
+        size = (max(1, int(round(w * scale))), max(1, int(round(h * scale))))
+        leaf_mask = cv2.resize(leaf_mask, size, interpolation=cv2.INTER_NEAREST)
+        h, w = leaf_mask.shape[:2]
+
+    bgra = np.zeros((h, w, 4), np.uint8)
+    bgra[:, :, 3] = np.where(leaf_mask.astype(bool), _CUTOUT_LEAF_ALPHA, 255)
+
+    ok, buf = cv2.imencode(".png", bgra)
+    if not ok:
+        raise PipelineError(
+            "internal",
+            "Failed to encode the leaf cutout.",
+            500,
+            "DG-CUTOUT-ENCODE",
+            "build_leaf_cutout(): cv2.imencode('.png') failed.",
+        )
     return "data:image/png;base64," + base64.b64encode(buf.tobytes()).decode("ascii")
 
 
@@ -656,6 +773,10 @@ def analyze(
             "no_leaf_detected",
             "No corn leaf was detected in this image. Try a closer, well-lit photo of a single leaf.",
             200,
+            "DG-LEAF-NONE",
+            f"analyze(): YOLO returned 0 instances at {w}x{h} (source "
+            f"{source_shape[1]}x{source_shape[0]}) - nothing leaf-shaped in the frame, so the "
+            f"marker was never used (sam={'on' if use_sam else 'off'}).",
         )
 
     # Legacy bug 1: classify_disease() used boxes.cls[0] - the FIRST detection in
@@ -696,6 +817,14 @@ def analyze(
             "no_leaf_detected",
             "No leaf was found where you tapped. Tap on the blade itself and try again.",
             200,
+            "DG-LEAF-TAP",
+            # Whether the marker was actually consulted is the thing to know
+            # here: with mask_source=yolo it was not, so a "move the marker"
+            # instruction on screen would be pointing at the wrong lever.
+            f"analyze(): mask empty after primary_component - {len(instances)} instance(s) "
+            f"detected, mask_source={mask_source}, components={mask_components}, "
+            f"marker=({(point or (0.5, 0.5))[0]:.2f},{(point or (0.5, 0.5))[1]:.2f}) "
+            f"{'used' if mask_source.startswith('sam') else 'not used'}.",
         )
 
     # The detector has no reject class, so a high confidence here means nothing
@@ -707,6 +836,10 @@ def analyze(
             "This does not look like a corn leaf. Fill the frame with a single "
             "leaf in even light and try again.",
             200,
+            "DG-LEAF-IMPLAUSIBLE",
+            f"analyze(): plausibility reject - veg_frac={veg_frac:.3f} (min {min_veg_frac}), "
+            f"roughness={roughness:.1f} (max {max_roughness}); {len(instances)} instance(s) "
+            f"detected, top conf {top.conf:.2f}, mask_source={mask_source}.",
         )
 
     segmented = apply_leaf_mask(img, top.mask)
@@ -728,6 +861,9 @@ def analyze(
             "yellowing rather than lesions. Try a leaf with distinct spots on "
             "otherwise green tissue.",
             200,
+            "DG-SEV-GUARD",
+            f"analyze(): severity {percent:.1f}% over the DEGLS_MAX_PLAUSIBLE_SEVERITY "
+            f"ceiling of {max_plausible_severity}%.",
         )
 
     overlay = build_overlay(segmented, lesion)
@@ -740,7 +876,7 @@ def analyze(
             "confidence": round(top.conf, 4),
         },
         "severity": {"percent": percent, "lesion_px": lesion_px, "leaf_px": leaf_px},
-        "images": {"overlay": overlay},
+        "images": {"overlay": overlay, "leaf_cutout": build_leaf_cutout(top.mask)},
         "meta": {
             "processing_ms": int((time.perf_counter() - t0) * 1000),
             "instances_detected": len(instances),
@@ -785,7 +921,13 @@ def extract_upload(content_type: str, body: bytes) -> Tuple[bytes, Optional[str]
 
     if mime.startswith("image/"):
         if mime not in ALLOWED_MIME:
-            raise PipelineError("invalid_image", f"Unsupported content type: {mime}", 415)
+            raise PipelineError(
+                "invalid_image",
+                f"Unsupported content type: {mime}",
+                415,
+                "DG-REQ-MIME",
+                f"extract_upload(): raw body Content-Type '{mime}' not in ALLOWED_MIME.",
+            )
         return body, None
 
     if mime != "multipart/form-data":
@@ -793,11 +935,20 @@ def extract_upload(content_type: str, body: bytes) -> Tuple[bytes, Optional[str]
             "invalid_image",
             "Expected multipart/form-data with a 'file' field, or a raw image/* body.",
             415,
+            "DG-REQ-CTYPE",
+            f"extract_upload(): Content-Type was '{mime or 'missing'}', "
+            "expected multipart/form-data or image/*.",
         )
 
     boundary = params.get("boundary")
     if not boundary:
-        raise PipelineError("invalid_image", "Missing multipart boundary.", 400)
+        raise PipelineError(
+            "invalid_image",
+            "Missing multipart boundary.",
+            400,
+            "DG-REQ-BOUNDARY",
+            "extract_upload(): multipart/form-data Content-Type carried no boundary param.",
+        )
 
     delim = b"--" + boundary.encode("latin-1")
     for part in body.split(delim):
@@ -820,27 +971,52 @@ def extract_upload(content_type: str, body: bytes) -> Tuple[bytes, Optional[str]
                 filename = raw.strip('"').strip("'")
         return payload.rstrip(b"\r\n"), filename
 
-    raise PipelineError("invalid_image", "No 'file' field found in the upload.", 400)
+    raise PipelineError(
+        "invalid_image",
+        "No 'file' field found in the upload.",
+        400,
+        "DG-REQ-NOFILE",
+        f"extract_upload(): no part named 'file' in {len(body)} bytes of multipart body.",
+    )
 
 
 def validate_upload(data: bytes, filename: Optional[str]) -> None:
     if not data:
-        raise PipelineError("invalid_image", "The uploaded file is empty.", 400)
+        raise PipelineError(
+            "invalid_image",
+            "The uploaded file is empty.",
+            400,
+            "DG-REQ-EMPTY",
+            "validate_upload(): the 'file' part decoded to 0 bytes.",
+        )
     if len(data) > MAX_UPLOAD_BYTES:
         raise PipelineError(
             "file_too_large",
             f"File is {len(data) / 1e6:.1f} MB; the limit is {MAX_UPLOAD_BYTES // (1024 * 1024)} MB.",
             413,
+            "DG-REQ-TOOBIG",
+            f"validate_upload(): {len(data)} bytes over the {MAX_UPLOAD_BYTES}-byte app limit "
+            "(the function did receive it, so this is not the 4.5 MB edge limit).",
         )
     if filename:
         ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
         if ext not in ALLOWED_EXT:
             raise PipelineError(
-                "invalid_image", f"Unsupported file type '.{ext}'. Use png, jpg or jpeg.", 415
+                "invalid_image",
+                f"Unsupported file type '.{ext}'. Use png, jpg or jpeg.",
+                415,
+                "DG-REQ-EXT",
+                f"validate_upload(): filename extension '.{ext}' not in ALLOWED_EXT.",
             )
     # Sniff the magic bytes regardless of what the filename claims.
     if not (data[:8] == b"\x89PNG\r\n\x1a\n" or data[:3] == b"\xff\xd8\xff"):
-        raise PipelineError("invalid_image", "File is not a PNG or JPEG image.", 415)
+        raise PipelineError(
+            "invalid_image",
+            "File is not a PNG or JPEG image.",
+            415,
+            "DG-REQ-MAGIC",
+            f"validate_upload(): leading bytes {data[:4].hex()} are neither PNG nor JPEG.",
+        )
 
 
 def _query_overrides(path: str) -> Dict[str, Any]:
@@ -886,8 +1062,18 @@ class handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def _error(self, status: int, code: str, message: str) -> None:
-        self._send(status, {"ok": False, "error": {"code": code, "message": message}})
+    def _error(self, status: int, code: str, message: str, diag: str, reason: str) -> None:
+        self._send(
+            status,
+            {
+                "ok": False,
+                "error": {
+                    "code": code,
+                    "message": message,
+                    "diag": {"code": diag, "reason": reason},
+                },
+            },
+        )
 
     def do_GET(self) -> None:
         self._send(200, {"ok": True, "status": "ready", "models": str(MODELS_DIR)})
@@ -896,7 +1082,14 @@ class handler(BaseHTTPRequestHandler):
         try:
             length = int(self.headers.get("Content-Length") or 0)
             if length > MAX_UPLOAD_BYTES * 1.2:  # allow for multipart framing
-                self._error(413, "file_too_large", "Upload exceeds the 10 MB limit.")
+                self._error(
+                    413,
+                    "file_too_large",
+                    "Upload exceeds the 10 MB limit.",
+                    "DG-REQ-LENGTH",
+                    f"do_POST(): Content-Length {length} exceeds the app limit before reading "
+                    "the body.",
+                )
                 return
             body = self.rfile.read(length) if length else b""
 
@@ -907,11 +1100,28 @@ class handler(BaseHTTPRequestHandler):
         except PipelineError as exc:
             self._send(
                 exc.status,
-                {"ok": False, "error": {"code": exc.code, "message": exc.message}},
+                {
+                    "ok": False,
+                    "error": {
+                        "code": exc.code,
+                        "message": exc.message,
+                        "diag": {"code": exc.diag, "reason": exc.reason},
+                    },
+                },
             )
-        except Exception:  # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001
             traceback.print_exc()
-            self._error(500, "internal", "An unexpected error occurred while analysing the image.")
+            # The exception type and the innermost frame are what make a 500 in
+            # the field worth anything; the full traceback stays in the logs.
+            frame = traceback.extract_tb(exc.__traceback__)[-1]
+            self._error(
+                500,
+                "internal",
+                "An unexpected error occurred while analysing the image.",
+                "DG-SRV-UNCAUGHT",
+                f"{type(exc).__name__} at {frame.name}() "
+                f"{Path(frame.filename).name}:{frame.lineno}: {exc}"[:300],
+            )
 
     def log_message(self, fmt, *args):  # keep the function logs quiet
         return

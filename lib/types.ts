@@ -54,8 +54,16 @@ export interface AnalyzeSuccess {
   ok: true;
   disease: DiseaseResult;
   severity: SeverityResult;
-  /** Data URIs, since the serverless filesystem is ephemeral. */
-  images: { overlay: string };
+  /**
+   * Data URIs, since the serverless filesystem is ephemeral.
+   *
+   * `overlay` is the flattened picture: leaf on black with the red lesion mask
+   * painted in. `leaf_cutout` is the leaf mask on its own — a transparent PNG,
+   * black outside the blade and 10% black over it — so the segmentation can be
+   * shown over the photo without the lesion pass. Optional because history
+   * records and the dev fixtures predate it.
+   */
+  images: { overlay: string; leaf_cutout?: string };
   meta: AnalyzeMeta;
 }
 
@@ -66,9 +74,24 @@ export type AnalyzeErrorCode =
   | "file_too_large"
   | "internal";
 
+/**
+ * Debugging detail carried alongside a failure. Shown small and muted on the
+ * error screen so a grower in a field can read the code down the phone, and so
+ * the reason names the stage that actually broke rather than the UI bucket it
+ * fell into. Optional because a deployment older than this field won't send it.
+ */
+export interface AnalyzeDiag {
+  /** Short, stable, greppable: `DG-<area>-<fault>`, e.g. "DG-FN-KILLED". */
+  code: string;
+  /** One technical line: what failed and where. */
+  reason: string;
+  /** `x-vercel-id` off the response, when the platform supplied one. */
+  requestId?: string;
+}
+
 export interface AnalyzeFailure {
   ok: false;
-  error: { code: AnalyzeErrorCode; message: string };
+  error: { code: AnalyzeErrorCode; message: string; diag?: AnalyzeDiag };
 }
 
 export type AnalyzeResponse = AnalyzeSuccess | AnalyzeFailure;
@@ -102,6 +125,13 @@ export interface ScanRecord extends ScanInput {
   /** Downscaled JPEG data URI — full-size overlays would blow out IndexedDB. */
   thumbnail: string;
   overlay: string;
+  /**
+   * The segmented blade with no lesion marks, flattened to one JPEG at save
+   * time (see flattenCutout). Optional: records written before this field
+   * existed do not have it, and a reopened scan without one simply shows no
+   * segmentation, exactly as it did then.
+   */
+  segmented?: string;
 }
 
 /**

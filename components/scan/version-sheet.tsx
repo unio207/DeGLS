@@ -27,6 +27,16 @@ export interface VersionEntry {
 
 export const VERSIONS: VersionEntry[] = [
   {
+    version: "0.9.0",
+    date: "2026-08-05",
+    notes: [
+      "The marker is placed on your photo for you, so you can scan straight away. Drag it if it is not on the blade you meant.",
+      "Results come back almost at once: the scan now starts while you are still filling in the field notes.",
+      "Severity now measures only the blade itself, not the soil and residue behind it. Readings are lower than they were before this build, and lower is the honest number — but treat the percentage as a rough guide rather than a measurement.",
+      "Problems now show a short code you can read out or copy, so a failure in the field can be traced afterwards.",
+    ],
+  },
+  {
     version: "0.8.0",
     date: "2026-08-05",
     notes: [

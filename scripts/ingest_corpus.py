@@ -268,7 +268,7 @@ def build_source(path: Path, meta: dict[str, Any]) -> dict[str, Any]:
         "publisher": str(meta.get("publisher") or "Unknown publisher"),
         "file": path.name,
     }
-    for key in ("url", "author", "date", "crop"):
+    for key in ("url", "author", "date", "retrieved", "crop"):
         value = meta.get(key)
         if value:
             source[key] = str(value)

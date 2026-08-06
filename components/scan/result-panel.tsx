@@ -13,6 +13,11 @@ export interface ResultView {
   disease: DiseaseResult;
   severity: SeverityResult;
   overlay: string;
+  /**
+   * The segmented blade with no lesion marks. Null when there was no photo to
+   * build it from, and for records saved before it was kept.
+   */
+  segmented: string | null;
   /** The untouched photo, when we still have it. History records keep only the overlay. */
   original: string | null;
   input: ScanInput;
@@ -35,7 +40,7 @@ export function ResultPanel({
   hasConversation?: boolean;
   onNewScan: () => void;
 }) {
-  const { disease, severity, overlay, original, input, meta } = view;
+  const { disease, severity, overlay, segmented, original, input, meta } = view;
 
   // Temporary demo override (see demo-healthy.ts). Everything that would name a
   // disease or put a number on the severity is suppressed together — a healthy
@@ -46,11 +51,13 @@ export function ResultPanel({
   const lowConfidence = !healthy && disease.confidence < LOW_CONFIDENCE;
   const imageAlt = healthy ? "The scanned corn leaf" : `${disease.label} on a corn leaf`;
 
-  // A reopened history record under the demo override keeps only the overlay,
-  // which that branch declines to show — so there is nothing for the right-hand
-  // column to hold, and the tablet layout stays a single centred column rather
-  // than a half-width panel next to a void.
-  const hasPicture = healthy ? original !== null : true;
+  // What the demo override shows in place of the overlay: the segmentation when
+  // there is one, the bare photo otherwise. A scan saved before the segmentation
+  // was kept has neither, and that branch declines to show the overlay — so
+  // there is nothing for the right-hand column to hold, and the tablet layout
+  // stays a single centred column rather than a half-width panel next to a void.
+  const healthyPicture = segmented ?? original;
+  const hasPicture = healthy ? healthyPicture !== null : true;
 
   return (
     /*
@@ -137,19 +144,22 @@ export function ResultPanel({
       {/*
         Under the demo override the server overlay is never rendered: the red
         lesion mask is baked into that PNG, so a panel saying nothing was
-        classified would be showing lesions anyway. The original photo takes its
-        place, plain — a wipe between two identical frames has nothing to reveal,
-        so the comparer, its handle and its labels all go. Reopened history
-        records keep only the overlay, so there is no photo to fall back to and
-        the picture is dropped entirely rather than shown in red. Remove this
-        branch after the demo; the `else` below is the real behaviour.
+        classified would be showing lesions anyway. The segmented blade takes its
+        place — the same picture minus the lesion pass, black background and
+        blade at 0.9x — so what the app measured is still shown. One flat image
+        rather than a wipe: there is no second frame to reveal, and it is the
+        same picture whether the scan is live or reopened, because it is the same
+        bytes. A scan saved before that picture was kept falls back to the plain
+        photo if it still has one, and to no picture at all rather than one in
+        red. Remove this branch after the demo; the `else` below is the real
+        behaviour.
       */}
       {healthy ? (
-        original && (
+        healthyPicture && (
           <div className="bg-card rounded-2xl border p-4 md:col-start-2 md:row-start-1 md:row-span-2">
             <div className="bg-secondary aspect-[4/5] w-full overflow-hidden rounded-xl">
               {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={original} alt={imageAlt} className="h-full w-full object-contain" />
+              <img src={healthyPicture} alt={imageAlt} className="h-full w-full object-contain" />
             </div>
           </div>
         )

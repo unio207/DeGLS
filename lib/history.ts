@@ -242,6 +242,40 @@ export async function makeThumbnail(dataUri: string, max = 320, quality = 0.7): 
   return canvas.toDataURL("image/jpeg", quality);
 }
 
+/**
+ * Photo + leaf cutout -> one flat picture of the segmented blade.
+ *
+ * The cutout the API returns is an alpha mask, not a picture: opaque black
+ * outside the blade, 10% black over it. Laid on the photo it reads as the leaf
+ * on a black field, but on its own it is a black rectangle with a leaf-shaped
+ * hole. A saved scan keeps no photo — only the overlay — so the two have to be
+ * flattened together here, while the photo is still in hand, for the reopened
+ * scan to have anything to show.
+ *
+ * Drawn at the cutout's own resolution, which is the size the API already
+ * downscaled the overlay to. JPEG rather than PNG because the content is a
+ * photograph: the same frame as PNG is the multi-megabyte thing the overlay had
+ * to be engineered down from, and the background is flat black, which is where
+ * JPEG is cheapest.
+ */
+export async function flattenCutout(
+  photo: string,
+  cutout: string,
+  quality = 0.9,
+): Promise<string> {
+  const [base, mask] = await Promise.all([loadImage(photo), loadImage(cutout)]);
+
+  const canvas = document.createElement("canvas");
+  canvas.width = mask.naturalWidth;
+  canvas.height = mask.naturalHeight;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) throw new Error("Could not composite the leaf segmentation.");
+
+  ctx.drawImage(base, 0, 0, canvas.width, canvas.height);
+  ctx.drawImage(mask, 0, 0);
+  return canvas.toDataURL("image/jpeg", quality);
+}
+
 export function loadImage(src: string): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
     const img = new Image();

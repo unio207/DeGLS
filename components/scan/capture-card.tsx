@@ -38,7 +38,18 @@ function clamp01(v: number): number {
 }
 
 /**
- * Map a click on the preview to a point in the photo's own pixel grid.
+ * The marker's starting position on every new photo: dead centre.
+ *
+ * On a centred cover crop the frame centre IS the image centre whatever the
+ * photo's aspect, so this needs no measuring and is correct before the image
+ * has even decoded. It is also exactly what the server already falls back to
+ * when no point is sent, so auto-placing here changes no inference — it only
+ * makes the default visible and draggable instead of a hidden assumption.
+ */
+export const CENTRE_TAP: Tap = { point: { x: 0.5, y: 0.5 }, fx: 0.5, fy: 0.5 };
+
+/**
+ * Map a position in the preview frame to a point in the photo's own pixel grid.
  *
  * The preview is `object-cover` inside a 4:5 frame, so the browser scales the
  * image by the LARGER of the two axis ratios and centres it, throwing the
@@ -51,7 +62,7 @@ function clamp01(v: number): number {
  * frame's middle) is 300px into a 600px-wide draw, i.e. 0.5 of the image, but
  * a click at x=0 is image x = 140/600 = 0.233, not 0.
  */
-function tapToImage(e: React.MouseEvent, img: HTMLImageElement): Tap | null {
+function frameToImage(fx: number, fy: number, img: HTMLImageElement): Tap | null {
   const box = img.getBoundingClientRect();
   const { naturalWidth: nw, naturalHeight: nh } = img;
   if (!nw || !nh || !box.width || !box.height) return null;
@@ -62,21 +73,40 @@ function tapToImage(e: React.MouseEvent, img: HTMLImageElement): Tap | null {
   const offsetX = (box.width - drawnW) / 2;
   const offsetY = (box.height - drawnH) / 2;
 
-  // detail === 0 means the button was fired from the keyboard, where clientX/Y
-  // are meaningless. The frame centre is the honest answer there, and on a
-  // centred cover crop the frame centre is also the image centre.
-  const keyboard = e.detail === 0;
-  const elX = keyboard ? box.width / 2 : e.clientX - box.left;
-  const elY = keyboard ? box.height / 2 : e.clientY - box.top;
+  // Clamped to the frame first: a drag holds pointer capture and keeps
+  // reporting positions past the edge, which should pin to the edge.
+  const elX = clamp01(fx) * box.width;
+  const elY = clamp01(fy) * box.height;
 
   return {
     point: {
       x: clamp01((elX - offsetX) / drawnW),
       y: clamp01((elY - offsetY) / drawnH),
     },
-    fx: clamp01(elX / box.width),
-    fy: clamp01(elY / box.height),
+    fx: clamp01(fx),
+    fy: clamp01(fy),
   };
+}
+
+/** Same mapping, from a pointer's client coordinates. */
+function pointerToImage(
+  e: { clientX: number; clientY: number },
+  img: HTMLImageElement,
+): Tap | null {
+  const box = img.getBoundingClientRect();
+  if (!box.width || !box.height) return null;
+  return frameToImage((e.clientX - box.left) / box.width, (e.clientY - box.top) / box.height, img);
+}
+
+/** Arrow-key nudge, as a fraction of the frame. */
+const KEY_STEP = 0.02;
+
+function arrowDelta(key: string): [number, number] | null {
+  if (key === "ArrowLeft") return [-KEY_STEP, 0];
+  if (key === "ArrowRight") return [KEY_STEP, 0];
+  if (key === "ArrowUp") return [0, -KEY_STEP];
+  if (key === "ArrowDown") return [0, KEY_STEP];
+  return null;
 }
 
 /**
@@ -87,10 +117,11 @@ function tapToImage(e: React.MouseEvent, img: HTMLImageElement): Tap | null {
  * The frame keeps a fixed 4:5 aspect whether it is empty or holding a preview,
  * so choosing a photo never shifts the form below it.
  *
- * Once a photo is in, the frame is also the tap target for marking the leaf.
- * That tap is what tells the server which blade to segment; without it the
- * server falls back to the frame centre, which was wrong on 2 of 6 real field
- * photos, one of them by 17 severity points.
+ * Once a photo is in, the frame carries the marker that tells the server which
+ * blade to segment. It is auto-placed at the centre so nothing is ever blocked
+ * on a tap, and the whole frame stays draggable/tappable so moving it is one
+ * gesture — the centre is right most of the time but not always, and being
+ * able to correct it is worth up to ~17 severity points on a bad frame.
  */
 export function CaptureCard({
   previewUrl,
@@ -107,7 +138,7 @@ export function CaptureCard({
   onSelect: (file: File) => void;
   onReject: (message: string) => void;
   tap: Tap | null;
-  /** Null whenever the photo changes: the old point refers to different pixels. */
+  /** Reset to CENTRE_TAP whenever the photo changes: the old point refers to different pixels. */
   onTap: (tap: Tap | null) => void;
   disabled?: boolean;
 }) {
@@ -119,6 +150,15 @@ export function CaptureCard({
   // have rather than on the already-downscaled upload.
   const [picked, setPicked] = useState<File | null>(null);
   const [cropOpen, setCropOpen] = useState(false);
+  // A pointer is currently down on the frame, i.e. the marker is being dragged.
+  // The ref is what the move handler reads: a `pointermove` that lands in the
+  // same tick as the `pointerdown` would still see the pre-render state value
+  // and drop the drag on the floor.
+  const draggingMarker = useRef(false);
+  const [movingMarker, setMovingMarker] = useState(false);
+  // The hint retires the moment the marker is touched — it is an invitation,
+  // not a caption, and it has nothing left to say once the gesture is known.
+  const [markerMoved, setMarkerMoved] = useState(false);
   // `picked` is lost whenever this card unmounts — which now happens when a
   // failed scan sends the user back to re-tap — so fall back to the upload
   // copy. It is capped at 2048px by prepareForUpload rather than being the
@@ -134,9 +174,18 @@ export function CaptureCard({
     setPicked(file);
     // Every new photo arrives here, including the cropped copy from CropDialog.
     // A crop re-frames the pixels, so a point taken before it now names a
-    // different part of the leaf — clearing on any change is the only correct
-    // rule, and it puts the "Tap the leaf" prompt back on screen.
+    // different part of the leaf — resetting on any change is the only correct
+    // rule, and the fresh default is the centre of the new framing.
+    //
+    // Clearing here and re-placing alongside onSelect below, rather than
+    // placing once up front, keeps the point and the file changing together.
+    // Setting the centre before prepareForUpload resolves would briefly pair a
+    // NEW point with the OLD file, and scan-app speculates on exactly that
+    // pair — a slow prepare (>400ms, seen on a 1MB PNG) fires an inference
+    // against the outgoing photo that can never be adopted. No preview is on
+    // screen during the await, so this is invisible.
     onTap(null);
+    setMarkerMoved(false);
 
     // Every photo goes through this, not just oversized ones: the server runs
     // out of memory on full-resolution frames regardless of file size, because
@@ -144,6 +193,7 @@ export function CaptureCard({
     // untouched when it is already small enough in both dimensions and bytes.
     const prepared = await prepareForUpload(file, SHRINK_TARGET);
     if (prepared) {
+      onTap(CENTRE_TAP);
       onSelect(prepared);
       return;
     }
@@ -151,6 +201,7 @@ export function CaptureCard({
       onReject("That photo is too large and couldn't be resized. Take a new one at a lower resolution.");
       return;
     }
+    onTap(CENTRE_TAP);
     onSelect(file);
   }
 
@@ -186,18 +237,38 @@ export function CaptureCard({
               className="absolute inset-0 h-full w-full object-cover"
             />
 
-            {/* The whole frame is the target — a thumb needs no aiming to hit
-                it, and the marker then shows what was actually understood. */}
+            {/* The whole frame is the tap target — a thumb needs no aiming to
+                hit it, and the marker then shows what was actually understood.
+                Deliberately click-only, with no touch-action override: this is
+                most of a phone's viewport and the field note sits right below
+                it, so a swipe that starts on the photo has to keep scrolling
+                the page. Only the marker's own hit area below claims the drag. */}
             <button
               type="button"
               disabled={disabled}
-              aria-label={
-                tap ? "Move the marker to the leaf you want measured" : "Tap the leaf you want measured"
-              }
+              aria-label="Leaf marker. Tap anywhere on the photo to move it to the leaf you want measured; arrow keys nudge it, or drag the marker itself."
               onClick={(e) => {
                 if (!imgRef.current) return;
-                const next = tapToImage(e, imgRef.current);
+                setMarkerMoved(true);
+                // detail === 0 means the button was fired from the keyboard,
+                // where clientX/Y are meaningless. The frame centre is the
+                // honest answer there, and on a centred cover crop the frame
+                // centre is also the image centre.
+                const next =
+                  e.detail === 0
+                    ? frameToImage(0.5, 0.5, imgRef.current)
+                    : pointerToImage(e, imgRef.current);
                 if (next) onTap(next);
+              }}
+              onKeyDown={(e) => {
+                const delta = arrowDelta(e.key);
+                if (!delta || !imgRef.current) return;
+                e.preventDefault();
+                const from = tap ?? CENTRE_TAP;
+                const next = frameToImage(from.fx + delta[0], from.fy + delta[1], imgRef.current);
+                if (!next) return;
+                setMarkerMoved(true);
+                onTap(next);
               }}
               className="absolute inset-0 cursor-crosshair"
             />
@@ -208,19 +279,59 @@ export function CaptureCard({
                 style={{ left: `${tap.fx * 100}%`, top: `${tap.fy * 100}%` }}
                 className="pointer-events-none absolute -translate-x-1/2 -translate-y-1/2"
               >
-                <span className="border-primary block size-9 rounded-full border-[3px] bg-white/25 shadow-[0_0_0_2px_rgba(255,255,255,0.9)] md:size-10" />
+                <span
+                  className={[
+                    "border-primary block size-9 rounded-full border-[3px] bg-white/25 shadow-[0_0_0_2px_rgba(255,255,255,0.9)] transition-transform md:size-10",
+                    movingMarker ? "scale-115" : "",
+                  ].join(" ")}
+                />
                 <span className="bg-primary absolute top-1/2 left-1/2 size-2 -translate-x-1/2 -translate-y-1/2 rounded-full ring-2 ring-white/90" />
+
+                {/* The drag handle, and the ONLY element that opts out of touch
+                    scrolling. 44px however small the ring is drawn, because a
+                    thumb aiming at the marker is what lands here. A tap that
+                    lands on it needs no discrimination from a drag: both end
+                    with the point under the finger, so there is no timer and
+                    no movement threshold, and a tap stays instant. */}
+                <span
+                  onPointerDown={(e) => {
+                    if (disabled || !imgRef.current) return;
+                    e.currentTarget.setPointerCapture(e.pointerId);
+                    draggingMarker.current = true;
+                    setMovingMarker(true);
+                    setMarkerMoved(true);
+                  }}
+                  onPointerMove={(e) => {
+                    if (!draggingMarker.current || !imgRef.current) return;
+                    const next = pointerToImage(e, imgRef.current);
+                    if (next) onTap(next);
+                  }}
+                  onPointerUp={(e) => {
+                    draggingMarker.current = false;
+                    setMovingMarker(false);
+                    if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+                      e.currentTarget.releasePointerCapture(e.pointerId);
+                    }
+                  }}
+                  onPointerCancel={() => {
+                    draggingMarker.current = false;
+                    setMovingMarker(false);
+                  }}
+                  className={[
+                    "pointer-events-auto absolute top-1/2 left-1/2 size-11 -translate-x-1/2 -translate-y-1/2 touch-none rounded-full",
+                    movingMarker ? "cursor-grabbing" : "cursor-grab",
+                  ].join(" ")}
+                />
+
+                {!markerMoved && (
+                  // Sits under the marker rather than over the photo: the
+                  // frame is already finished, this only names the gesture.
+                  <span className="font-display absolute top-full left-1/2 mt-2 -translate-x-1/2 rounded-full bg-black/60 px-3 py-1.5 text-xs font-semibold whitespace-nowrap text-white shadow-md backdrop-blur-[2px] md:text-[0.8125rem]">
+                    Drag to the leaf you want measured
+                  </span>
+                )}
               </span>
-            ) : (
-              // Dimming the photo until it is tapped is the instruction: the
-              // frame reads as unfinished, and the prompt sits where the thumb
-              // already is rather than as a caption someone has to read first.
-              <span className="pointer-events-none absolute inset-0 grid place-items-center bg-black/35">
-                <span className="font-display rounded-full bg-white px-4 py-2 text-[0.9375rem] font-bold text-black shadow-lg md:px-5 md:py-2.5 md:text-base">
-                  Tap the leaf
-                </span>
-              </span>
-            )}
+            ) : null}
 
             <div className="absolute right-3 bottom-3 flex gap-2 md:right-4 md:bottom-4">
               <Button

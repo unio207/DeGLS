@@ -6,6 +6,8 @@ import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import type {
+  AnalyzeDiag,
+  AnalyzeResponse,
   AnalyzeSuccess,
   DiagnosisContext,
   LeafPoint,
@@ -15,6 +17,7 @@ import type {
 import {
   QuotaError,
   fileToDataUri,
+  flattenCutout,
   makeThumbnail,
   newId,
   recallHybrid,
@@ -51,17 +54,51 @@ function today(): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
 
+/** How long the marker must sit still before a speculative scan is worth firing. */
+const SPECULATE_AFTER_MS = 400;
+
+/**
+ * The point as the server will actually see it.
+ *
+ * analyze() writes px/py at four decimals, so two points that round the same
+ * produce byte-identical requests and must not invalidate each other — a drag
+ * that ends a thousandth of a pixel from where it started is not a new scan.
+ */
+function pointKey(point: LeafPoint | null): string {
+  return point ? `${point.x.toFixed(4)},${point.y.toFixed(4)}` : "none";
+}
+
+/**
+ * A scan started before anyone asked for one.
+ *
+ * Safe because api/analyze.py never reads the field note: extract_upload()
+ * returns only (bytes, filename) and analyze() takes the bytes plus the
+ * ?px/py/sam query, so the answer is fixed the moment the photo and the marker
+ * are settled. Firing then is real work moved earlier, not a fake head start.
+ */
+interface Speculation {
+  /** File identity is the cache key: every new photo, including a crop, is a new File. */
+  file: File;
+  key: string;
+  controller: AbortController;
+  promise: Promise<AnalyzeResponse>;
+  /** Upload progress so far, so an adopted request resumes its bar instead of restarting it. */
+  fraction: number;
+  uploaded: boolean;
+}
+
 export function ScanApp() {
   const [phase, setPhase] = useState<Phase>("compose");
 
   const [file, setFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
-  // Where the grower tapped the leaf. Required before a scan can run: severity
-  // is lesion area over LEAF area, so the point decides the denominator, and
-  // the server's no-point fallback (frame centre) picked the wrong region on 2
-  // of 6 real field photos. Held here rather than in CaptureCard because that
-  // card unmounts while a scan runs, and the marker has to still be there when
-  // a failed scan sends the user back to move it.
+  // Which blade to measure: severity is lesion area over LEAF area, so the
+  // point decides the denominator. CaptureCard auto-places it at the centre of
+  // every new photo — the same place the server would have fallen back to — so
+  // it never gates a scan; moving it is a correction, not a chore. Held here
+  // rather than in CaptureCard because that card unmounts while a scan runs,
+  // and the marker has to still be there when a failed scan sends the user
+  // back to move it. This setter is the one place the point changes.
   const [tap, setTap] = useState<Tap | null>(null);
   const point: LeafPoint | null = tap?.point ?? null;
 
@@ -96,6 +133,7 @@ export function ScanApp() {
   const [scanId, setScanId] = useState<string | null>(null);
   const [errorCode, setErrorCode] = useState<ScanErrorCode>("internal");
   const [errorDetail, setErrorDetail] = useState<string | undefined>();
+  const [errorDiag, setErrorDiag] = useState<AnalyzeDiag | undefined>();
 
   const [historyOpen, setHistoryOpen] = useState(false);
   const [mapOpen, setMapOpen] = useState(false);
@@ -110,6 +148,12 @@ export function ScanApp() {
   const place = usePlace();
   const resultRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
+  // At most one speculative scan is ever alive. See Speculation above.
+  const specRef = useRef<Speculation | null>(null);
+  // Where the live speculation reports upload progress once submit() has
+  // adopted it. Null while it is still running unwatched.
+  const specWatcherRef = useRef<((fraction: number) => void) | null>(null);
+  const specKey = pointKey(point);
 
   const refreshCount = useCallback(() => {
     listScans(1000)
@@ -124,7 +168,73 @@ export function ScanApp() {
     return () => URL.revokeObjectURL(previewUrl);
   }, [previewUrl]);
 
-  useEffect(() => () => abortRef.current?.abort(), []);
+  useEffect(
+    () => () => {
+      abortRef.current?.abort();
+      specRef.current?.controller.abort();
+    },
+    [],
+  );
+
+  // Start the scan while the grower is still filling in the field note.
+  //
+  // The deps are a File reference and a rounded-point string, both stable
+  // across re-renders, so this cannot re-fire on a render — only on a genuinely
+  // new photo or a genuinely moved marker. The delay is what keeps a drag from
+  // becoming a burst of invocations: pointermove churns the point, the timer
+  // restarts each time, and only the position it settles on is ever sent.
+  useEffect(() => {
+    if (!file || phase !== "compose") return;
+    // Mock runs answer from a fixture; there is nothing to get a head start on.
+    if (typeof window !== "undefined" && mockCaseFrom(window.location.search)) return;
+
+    const live = specRef.current;
+    if (live && live.file === file && live.key === specKey) return;
+
+    // The photo or the marker changed, so whatever is in flight now describes
+    // pixels nobody is looking at. Kill it before it spends a serverless slot
+    // on an answer that can never be adopted.
+    live?.controller.abort();
+    specRef.current = null;
+    specWatcherRef.current = null;
+
+    const timer = setTimeout(() => {
+      const controller = new AbortController();
+      // Bounced through a mutable slot only because the record it writes to
+      // cannot exist until the promise inside it does. Upload events are async,
+      // so it is always wired up before the first one arrives.
+      let record: Speculation | null = null;
+      const promise = analyze({
+        file,
+        // Empty because they are not known yet and the server does not read
+        // them — that is the whole reason this request can run this early.
+        input: { corn_hybrid: "", location: "", date: "" },
+        point,
+        signal: controller.signal,
+        onUploadProgress: (fraction) => {
+          if (!record) return;
+          record.fraction = fraction;
+          if (fraction >= 1) record.uploaded = true;
+          specWatcherRef.current?.(fraction);
+        },
+      });
+      // Nobody is awaiting this yet, and an unhandled rejection would surface as
+      // a console error while the grower is mid-sentence. submit() does the real
+      // handling; this only marks the rejection as seen.
+      promise.catch(() => {});
+      record = {
+        file,
+        key: specKey,
+        controller,
+        promise,
+        fraction: 0,
+        uploaded: false,
+      };
+      specRef.current = record;
+    }, SPECULATE_AFTER_MS);
+
+    return () => clearTimeout(timer);
+  }, [file, specKey, point, phase]);
 
   function selectFile(next: File) {
     setFile(next);
@@ -148,7 +258,7 @@ export function ScanApp() {
   }
 
   async function submit() {
-    if (!file || !point) return;
+    if (!file) return;
 
     const input: ScanInput = {
       corn_hybrid: hybrid.trim(),
@@ -156,53 +266,105 @@ export function ScanApp() {
       date,
     };
 
-    abortRef.current?.abort();
-    const controller = new AbortController();
-    abortRef.current = controller;
+    // A speculation for exactly this photo and this marker is the request
+    // submit() was about to make, so take it over rather than pay for it twice.
+    // Anything else — none running, a different photo, a moved marker — falls
+    // through to the request this has always made.
+    const pending = specRef.current;
+    const adopted = pending && pending.file === file && pending.key === specKey ? pending : null;
+    specRef.current = null;
 
-    setUploadFraction(0);
-    setUploaded(false);
+    if (abortRef.current && abortRef.current !== adopted?.controller) abortRef.current.abort();
+
+    const report = (fraction: number) => {
+      setUploadFraction(fraction);
+      if (fraction >= 1) setUploaded(true);
+    };
+
+    /** The request as it has always been made: new controller, bar from zero. */
+    const fire = () => {
+      const controller = new AbortController();
+      abortRef.current = controller;
+      specWatcherRef.current = null;
+      setUploadFraction(0);
+      setUploaded(false);
+      return analyze({ file, input, point, signal: controller.signal, onUploadProgress: report });
+    };
+
+    if (adopted) {
+      abortRef.current = adopted.controller;
+      // Pick the bar up where the upload actually is rather than restarting it
+      // at zero, and take over reporting for the rest of it.
+      setUploadFraction(adopted.fraction);
+      setUploaded(adopted.uploaded);
+      specWatcherRef.current = report;
+    } else {
+      setUploadFraction(0);
+      setUploaded(false);
+    }
     setPhase("working");
 
     const mockCase = typeof window !== "undefined" ? mockCaseFrom(window.location.search) : null;
 
     try {
-      let response;
+      let response: AnalyzeResponse | null = null;
+
       if (mockCase) {
         setUploadFraction(1);
         setUploaded(true);
         response = await runMock(mockCase, file);
       } else {
-        response = await analyze({
-          file,
-          input,
-          point,
-          signal: controller.signal,
-          onUploadProgress: (fraction) => {
-            setUploadFraction(fraction);
-            if (fraction >= 1) setUploaded(true);
-          },
-        });
+        if (adopted) {
+          try {
+            const early = await adopted.promise;
+            // `internal` means the request did not survive rather than that the
+            // leaf could not be read — this function OOMs at its 1024 MB cap
+            // often enough that one honest retry beats an error screen for a
+            // scan the grower never watched fail. Every other outcome,
+            // "no leaf detected" included, is a real reading and stands.
+            if (early.ok || early.error.code !== "internal") response = early;
+          } catch {
+            // Cancelled by the grower (New scan) — silent, as it has always been.
+            if (adopted.controller.signal.aborted) return;
+          }
+        }
+        response ??= await fire();
       }
 
       if (!response.ok) {
         setErrorCode(response.error.code);
         setErrorDetail(response.error.message);
+        setErrorDiag(response.error.diag);
         setPhase("error");
         return;
       }
 
       await showResult(response, input);
     } catch (err) {
+      // An abort is the grower's own doing, so it stays silent and gets no code.
       if (err instanceof DOMException && err.name === "AbortError") return;
       setErrorCode(err instanceof NetworkError ? "network" : "internal");
       setErrorDetail(err instanceof Error ? err.message : undefined);
+      setErrorDiag(
+        err instanceof NetworkError
+          ? err.diag
+          : {
+              code: "DG-CLIENT-EXC",
+              reason: `${err instanceof Error ? `${err.name}: ${err.message}` : String(err)} — thrown in submit() before a response was handled.`,
+            },
+      );
       setPhase("error");
     }
   }
 
   async function showResult(response: AnalyzeSuccess, input: ScanInput) {
     const original = await fileToDataUri(file!).catch(() => null);
+    // Flattened here, once, and then both shown and saved. Composing it later
+    // is not an option: the record keeps no photo, so this is the last moment
+    // the two halves exist together. A failure costs the picture, not the scan.
+    const cutout = response.images.leaf_cutout;
+    const segmented =
+      original && cutout ? await flattenCutout(original, cutout).catch(() => null) : null;
     const id = newId();
     setScanId(id);
     setHasChat(false);
@@ -211,6 +373,7 @@ export function ScanApp() {
       disease: response.disease,
       severity: response.severity,
       overlay: response.images.overlay,
+      segmented,
       original,
       input,
       meta: response.meta,
@@ -232,6 +395,7 @@ export function ScanApp() {
         severity: response.severity,
         thumbnail,
         overlay: response.images.overlay,
+        ...(segmented ? { segmented } : {}),
       };
       await saveScan(record);
       refreshCount();
@@ -269,6 +433,9 @@ export function ScanApp() {
       disease: record.disease,
       severity: record.severity,
       overlay: record.overlay,
+      // Absent on records written before it was saved; the panel then shows no
+      // segmentation, which is what those scans did when they were taken.
+      segmented: record.segmented ?? null,
       original: null,
       input: {
         corn_hybrid: record.corn_hybrid,
@@ -286,6 +453,9 @@ export function ScanApp() {
 
   function newScan() {
     abortRef.current?.abort();
+    specRef.current?.controller.abort();
+    specRef.current = null;
+    specWatcherRef.current = null;
     setPhase("compose");
     setView(null);
     setScanId(null);
@@ -358,7 +528,7 @@ export function ScanApp() {
               <div>
                 <Button
                   onClick={submit}
-                  disabled={!file || !point}
+                  disabled={!file}
                   className="h-14 w-full gap-2.5 rounded-xl text-base font-semibold md:h-15 md:text-lg"
                 >
                   <ScanLineIcon aria-hidden className="size-5 md:size-6" />
@@ -368,11 +538,7 @@ export function ScanApp() {
                   className="text-muted-foreground mt-2 min-h-5 text-center text-[0.8125rem] md:text-sm"
                   aria-live="polite"
                 >
-                  {!file
-                    ? "Add a leaf photo to start."
-                    : !point
-                      ? "Tap the leaf in the photo so it measures the right blade."
-                      : "Takes about 2–5 seconds."}
+                  {!file ? "Add a leaf photo to start." : "Takes about 2–5 seconds."}
                 </p>
               </div>
             </div>
@@ -408,6 +574,7 @@ export function ScanApp() {
               <ScanError
                 code={errorCode}
                 detail={errorDetail}
+                diag={errorDiag}
                 onRetake={newScan}
                 onRetry={submit}
                 // Compose still holds the photo and the marker, so this is a

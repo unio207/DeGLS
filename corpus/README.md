@@ -47,13 +47,32 @@ Anything after the frontmatter is treated as body text.
 | `isu-before-applying-fungicides-stop-look-consider.md` | Iowa State Extension | Fungicide decision-making |
 | `isu-update-corn-diseases-fungicide-decisions.md` | Iowa State Extension | Infection conditions, timing |
 | `isu-fungicide-decisions-2026.md` | Iowa State Extension | ROI, hybrid susceptibility, planting date |
+| `cpn-southern-rust-encyclopedia.md` | Crop Protection Network | Southern rust vs common rust |
 | `illinois-corn-diseases-to-scout-july.md` | University of Illinois Extension | GLS, NCLB, tar spot |
 | `wisconsin-early-season-disease-update.md` | UW-Madison Extension | Timing, ROI tools |
+
+### Abiotic look-alikes — symptoms that are NOT disease
+
+The classifier and the severity mask can both read uniform yellowing as disease. These files
+exist so the assistant can talk a grower through chlorosis-vs-lesion themselves.
+
+| File | Publisher | Covers |
+|---|---|---|
+| `isu-yellow-corn-plants.md` | Iowa State Extension | Seven non-disease causes of yellow corn |
+| `isu-nitrogen-vs-sulfur-deficiency.md` | Iowa State Extension | N (lower leaves, V down midrib) vs S (new leaves) |
+| `isu-potassium-deficiency-corn.md` | Iowa State Extension | Lower-leaf margin firing vs N's midrib V |
+| `purdue-corn-responses-to-drought-stress.md` | Purdue Agronomy | Leaf rolling, green→gray→straw firing |
+| `purdue-top-leaf-death-and-senescence.md` | Purdue Agronomy | Natural senescence; uniform-vs-random plant pattern |
+| `psu-early-season-herbicide-injury-corn.md` | Penn State Extension | Bleaching, interveinal chlorosis by herbicide group |
 
 The two Purdue bulletins and the CPN fungicide efficacy table were transcribed from the source
 PDFs; the rest were transcribed from the live web pages. Each file's frontmatter points at the
 canonical URL — **check the original before acting on anything**, especially the fungicide
 efficacy table, which CPN revises annually.
+
+Files carrying a `retrieved:` frontmatter field were fetched from the live page on that date.
+Files without it predate the convention; their `date:` is the publication date, not a fetch
+date.
 
 ## Status: the index has not been built yet
 

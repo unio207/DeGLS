@@ -2,6 +2,8 @@
 
 import {
   CameraIcon,
+  CheckIcon,
+  CopyIcon,
   FileWarningIcon,
   LeafIcon,
   RotateCwIcon,
@@ -9,9 +11,10 @@ import {
   ServerCrashIcon,
   WifiOffIcon,
 } from "lucide-react";
+import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
-import type { AnalyzeErrorCode } from "@/lib/types";
+import type { AnalyzeDiag, AnalyzeErrorCode } from "@/lib/types";
 
 export type ScanErrorCode = AnalyzeErrorCode | "network";
 
@@ -30,17 +33,21 @@ interface Copy {
  * not a crash, and the old UI logged it to the console and showed nothing.
  */
 const COPY: Record<ScanErrorCode, Copy> = {
-  // Now reachable two ways: nothing leaf-like in the photo at all, or a tap
-  // that landed on soil or shadow beside the blade. The tap is the cheaper fix
-  // and needs no new photo, so it leads — see onAdjust below, which replaces
-  // the primary action for this code only.
+  // Now reachable two ways: nothing leaf-like in the photo at all, or a marker
+  // sitting on soil or shadow beside the blade. Moving the marker is the
+  // cheaper fix and needs no new photo, so it leads — see onAdjust below, which
+  // replaces the primary action for this code only.
+  //
+  // Worded around the MARKER, not a tap: CaptureCard now auto-places it at the
+  // centre of every photo, so a grower can land here without having deliberately
+  // tapped anything, and "tap again" would be describing something they never did.
   no_leaf_detected: {
     icon: LeafIcon,
-    title: "No leaf found where you tapped",
-    body: "Nothing measurable as a corn leaf was found at that point. Either the tap missed the blade, or the photo hasn't got a leaf the detector can read.",
+    title: "No leaf found where the marker is",
+    body: "Nothing measurable as a corn leaf was found at that spot. Either the marker isn't on the blade, or the photo hasn't got a leaf the detector can read.",
     tips: [
-      "Tap again, well inside the blade — the middle of it, not an edge, a shadow or the soil behind it.",
-      "If the tap was on the leaf, retake: fill more of the frame, blade within about a foot of the lens.",
+      "Drag the marker well inside the blade — the middle of it, not an edge, a shadow or the soil behind it.",
+      "If the marker was already on the leaf, retake: fill more of the frame, blade within about a foot of the lens.",
       "Hold the leaf flat and shoot square to it, not at a steep angle.",
       "One leaf at a time against a plain background, not a wall of canopy.",
     ],
@@ -99,15 +106,89 @@ const COPY: Record<ScanErrorCode, Copy> = {
   },
 };
 
+function execCommandCopy(text: string): boolean {
+  const ta = document.createElement("textarea");
+  ta.value = text;
+  ta.setAttribute("readonly", "");
+  ta.style.cssText = "position:fixed;top:0;left:0;opacity:0";
+  document.body.appendChild(ta);
+  ta.select();
+  let ok = false;
+  try {
+    ok = document.execCommand("copy");
+  } catch {
+    ok = false;
+  }
+  ta.remove();
+  return ok;
+}
+
+/**
+ * The code, big enough to hit with a thumb and copyable in one tap — in a field
+ * the alternative is transcribing it onto paper. What lands on the clipboard is
+ * everything needed to find the invocation in the Vercel log, not just the code.
+ *
+ * The icon swap is the only thing that changes on copy, and it is aria-hidden,
+ * so the surrounding role="alert" region has nothing new to re-announce.
+ */
+function CopyCode({ diag, uiCode }: { diag: AnalyzeDiag; uiCode: ScanErrorCode }) {
+  const [copied, setCopied] = useState(false);
+
+  async function copyAll() {
+    const lines = [
+      diag.code,
+      `ui: ${uiCode}`,
+      `reason: ${diag.reason}`,
+      diag.requestId ? `vercel-id: ${diag.requestId}` : null,
+      `at: ${new Date().toISOString()}`,
+    ].filter(Boolean);
+    const text = lines.join("\n");
+    let ok = false;
+    try {
+      await navigator.clipboard.writeText(text);
+      ok = true;
+    } catch {
+      // Safari on iOS refuses the async clipboard often enough that the field
+      // demo can't rely on it; the deprecated path still works from a tap.
+      ok = execCommandCopy(text);
+    }
+    // Only claim success when the write actually happened — otherwise the code
+    // is still on screen to read out, which is the fallback that never fails.
+    if (ok) {
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 2000);
+    }
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={copyAll}
+      aria-label={`Copy error code ${diag.code} and details`}
+      className="text-foreground hover:bg-secondary flex items-center gap-2 rounded-md border px-2 py-1 font-mono text-[0.8125rem] font-semibold tracking-tight"
+    >
+      {diag.code}
+      {copied ? (
+        <CheckIcon aria-hidden className="size-3.5 shrink-0" />
+      ) : (
+        <CopyIcon aria-hidden className="size-3.5 shrink-0" />
+      )}
+    </button>
+  );
+}
+
 export function ScanError({
   code,
   detail,
+  diag,
   onRetake,
   onRetry,
   onAdjust,
 }: {
   code: ScanErrorCode;
   detail?: string;
+  /** Debug code + technical reason, when the failure carried one. */
+  diag?: AnalyzeDiag;
   onRetake: () => void;
   onRetry: () => void;
   /** Back to the photo with the tap marker still on it, to move it. */
@@ -115,9 +196,13 @@ export function ScanError({
 }) {
   const copy = COPY[code] ?? COPY.internal;
   const Icon = copy.icon;
-  // For a missed leaf the server message only restates the title, so it is
-  // dropped; for the rarer codes it is the only clue about what actually broke.
-  const showDetail = detail && code !== "no_leaf_detected";
+  // The diag code shows on every failure including a missed leaf: that one is
+  // the most common thing to hit in a field, and DG-LEAF-NONE (detector found
+  // nothing) vs DG-LEAF-TAP (found a leaf, marker missed it) vs
+  // DG-LEAF-IMPLAUSIBLE (rejected on pixels) is the most useful thing a photo
+  // of this screen can tell us. The server *message* still doesn't show there,
+  // because for a missed leaf it only restates the title.
+  const showDetail = diag || (detail && code !== "no_leaf_detected");
 
   return (
     <section
@@ -143,9 +228,17 @@ export function ScanError({
         </ul>
 
         {showDetail && (
-          <p className="text-muted-foreground border-l-2 pl-3 font-mono text-[0.75rem] leading-snug">
-            {detail}
-          </p>
+          <div className="text-muted-foreground space-y-1 border-l-2 pl-3 font-mono text-[0.75rem] leading-snug">
+            {diag ? (
+              <>
+                <CopyCode diag={diag} uiCode={code} />
+                <p>{diag.reason}</p>
+                {diag.requestId && <p className="break-all">req {diag.requestId}</p>}
+              </>
+            ) : (
+              <p>{detail}</p>
+            )}
+          </div>
         )}
 
         <div className="grid gap-2">
@@ -159,7 +252,7 @@ export function ScanError({
                 className="h-14 w-full gap-2.5 rounded-xl text-base font-semibold md:h-15 md:text-lg"
               >
                 <LeafIcon aria-hidden className="size-5 md:size-6" />
-                Tap a different spot
+                Move the marker
               </Button>
               <Button
                 variant="outline"
