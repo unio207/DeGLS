@@ -289,6 +289,34 @@ _SESS_OPTS = ort.SessionOptions()
 _SESS_OPTS.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
 _SESS_OPTS.intra_op_num_threads = _env_int("DEGLS_THREADS", 0)
 
+# Both of these are ON by default in onnxruntime, and together they are what
+# made production alternate 500/200 on every other request.
+#
+# After its first run ORT plans a tensor-reuse buffer sized to the shapes it
+# saw, and keeps it for the life of the session. Every model here has static
+# input dimensions (YOLO 640, GAUNet 512, SAM 1024), so the planner commits
+# fully and never releases. Measured live RSS after each successive analyze()
+# in one process, SAM path, same photo:
+#
+#   default (both on)              1365 -> 2018 -> 2020 -> 2028 MB
+#   mem_pattern off                1393 -> 1430 -> 1434 -> 1439 MB
+#   mem_pattern off + arena off    1400 -> 1410 -> 1418 -> 1418 MB
+#
+# The SECOND request on a warm container cost 653 MB more than the first.
+# Against Vercel's 1024 MB that is the entire fault: request one fits, request
+# two is killed, the kill replaces the container, and the next request fits
+# again - which is precisely the 500/200/500/200 observed over ten sequential
+# production calls.
+#
+# Disabling these only on the SAM sessions was tried first and did NOT work
+# (1370 -> 2125 MB): most of the buffer belongs to YOLO and GAUNet, which run
+# on every request. It has to be global.
+#
+# Cost: +36 ms on a ~1100 ms warm request, about 3%. Outputs are unchanged -
+# this is an allocation strategy, not a numerical one.
+_SESS_OPTS.enable_mem_pattern = False
+_SESS_OPTS.enable_cpu_mem_arena = False
+
 _yolo_session: Optional[ort.InferenceSession] = None
 _gaunet_session: Optional[ort.InferenceSession] = None
 
@@ -319,11 +347,15 @@ def get_sam_sessions() -> Tuple[ort.InferenceSession, ort.InferenceSession]:
     global _sam_encoder, _sam_decoder
     if _sam_encoder is None:
         _sam_encoder = ort.InferenceSession(
-            _require(SAM_ENCODER_ONNX), sess_options=_SESS_OPTS, providers=["CPUExecutionProvider"]
+            _require(SAM_ENCODER_ONNX),
+            sess_options=_SESS_OPTS,
+            providers=["CPUExecutionProvider"],
         )
     if _sam_decoder is None:
         _sam_decoder = ort.InferenceSession(
-            _require(SAM_DECODER_ONNX), sess_options=_SESS_OPTS, providers=["CPUExecutionProvider"]
+            _require(SAM_DECODER_ONNX),
+            sess_options=_SESS_OPTS,
+            providers=["CPUExecutionProvider"],
         )
     return _sam_encoder, _sam_decoder
 
