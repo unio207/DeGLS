@@ -52,12 +52,19 @@ export function CompareImage({
 
   return (
     <figure className="m-0">
+      {/* No touch-action override on the frame, and no drag start here.
+          Both used to live on this element, which made the whole 4:5 block -
+          most of a phone viewport on the result screen - swallow every scroll
+          that began on it. Reported from an Android device as "doesn't scroll
+          half the time". A tap still jumps the wipe; dragging starts on the
+          handle below, which is the only thing that needs to own a gesture. */}
       <div
         ref={frameRef}
-        className="bg-secondary relative aspect-[4/5] w-full touch-none overflow-hidden rounded-xl select-none"
-        onPointerDown={(e) => {
-          setDragging(true);
-          setFromClientX(e.clientX);
+        className="bg-secondary relative aspect-[4/5] w-full overflow-hidden rounded-xl select-none"
+        onClick={(e) => {
+          // detail === 0 is a keyboard-synthesised click on the slider child;
+          // that path is handled by onKeyDown and must not jump the wipe.
+          if (e.detail !== 0) setFromClientX(e.clientX);
         }}
       >
         {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -95,6 +102,10 @@ export function CompareImage({
           aria-valuemax={100}
           aria-valuenow={Math.round(pos)}
           aria-valuetext={`Overlay covers ${Math.round(pos)} percent of the frame`}
+          onPointerDown={(e) => {
+            e.stopPropagation();
+            setDragging(true);
+          }}
           onKeyDown={(e) => {
             const step = e.shiftKey ? 10 : 4;
             if (e.key === "ArrowLeft") {
@@ -111,7 +122,10 @@ export function CompareImage({
               setPos(100);
             }
           }}
-          className="focus-visible:ring-ring absolute top-1/2 grid size-11 -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full border-2 border-white bg-black/55 text-white shadow-lg backdrop-blur-sm focus-visible:ring-4 focus-visible:outline-none md:size-12"
+          // touch-pan-y, not touch-none: the wipe only ever moves horizontally,
+          // so handing vertical gestures back to the browser costs nothing and
+          // means even the handle itself does not block scrolling the page.
+          className="focus-visible:ring-ring absolute top-1/2 grid size-11 -translate-x-1/2 -translate-y-1/2 touch-pan-y place-items-center rounded-full border-2 border-white bg-black/55 text-white shadow-lg backdrop-blur-sm focus-visible:ring-4 focus-visible:outline-none md:size-12"
           style={{ left: `${pos}%` }}
         >
           <MoveHorizontalIcon aria-hidden className="size-5 md:size-6" />

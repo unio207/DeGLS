@@ -66,7 +66,13 @@ export function CropDialog({
       {/* Wider on a tablet so the crop rectangle is dragged at closer to the
           photo's own scale — a 28px corner handle on a 300px-wide preview is a
           much coarser instrument than the same handle on 600px. */}
-      <DialogContent className="max-w-[min(96vw,32rem)] gap-3 p-4 md:max-w-[min(92vw,44rem)] md:gap-4 md:p-5">
+      {/* max-h/overflow so the footer stays reachable on a short viewport - a
+          phone in landscape, or a Chromebook window dragged small. Without it
+          the 60dvh image plus header and buttons can run off the bottom with
+          no way to scroll to "Use this crop". The crop surface itself keeps
+          touch-none: it is a deliberate two-dimensional gesture inside a modal
+          that is not expected to scroll in portrait. */}
+      <DialogContent className="max-h-[92dvh] max-w-[min(96vw,32rem)] gap-3 overflow-y-auto p-4 md:max-w-[min(92vw,44rem)] md:gap-4 md:p-5">
         <DialogHeader className="text-left">
           <DialogTitle className="font-display text-lg font-extrabold tracking-tight md:text-xl">
             Crop to the leaf

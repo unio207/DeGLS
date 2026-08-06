@@ -287,15 +287,32 @@ export function CaptureCard({
                 />
                 <span className="bg-primary absolute top-1/2 left-1/2 size-2 -translate-x-1/2 -translate-y-1/2 rounded-full ring-2 ring-white/90" />
 
-                {/* The drag handle, and the ONLY element that opts out of touch
-                    scrolling. 44px however small the ring is drawn, because a
-                    thumb aiming at the marker is what lands here. A tap that
-                    lands on it needs no discrimination from a drag: both end
-                    with the point under the finger, so there is no timer and
-                    no movement threshold, and a tap stays instant. */}
+                {/* The drag handle, for a mouse or a stylus only.
+
+                    Touch deliberately gets no drag and no touch-action
+                    override. Marker placement is two-dimensional, so the
+                    pan-y trick that saves the wipe handle in compare-image
+                    cannot work here - keeping drag on touch would mean
+                    touch-none, and a 44px dead spot in the dead centre of the
+                    photo is exactly where a thumb starts a scroll. That was
+                    reported from Android as the page not scrolling.
+
+                    Nothing is lost: a tap anywhere on the frame already places
+                    the marker, which is the discoverable gesture and covers
+                    the whole 2D range in one motion. The onClick below keeps a
+                    tap that lands on the handle itself from being swallowed. */}
                 <span
+                  onClick={(e) => {
+                    if (disabled || !imgRef.current) return;
+                    const next = pointerToImage(e, imgRef.current);
+                    if (next) {
+                      onTap(next);
+                      setMarkerMoved(true);
+                    }
+                  }}
                   onPointerDown={(e) => {
                     if (disabled || !imgRef.current) return;
+                    if (e.pointerType === "touch") return;
                     e.currentTarget.setPointerCapture(e.pointerId);
                     draggingMarker.current = true;
                     setMovingMarker(true);
@@ -318,7 +335,7 @@ export function CaptureCard({
                     setMovingMarker(false);
                   }}
                   className={[
-                    "pointer-events-auto absolute top-1/2 left-1/2 size-11 -translate-x-1/2 -translate-y-1/2 touch-none rounded-full",
+                    "pointer-events-auto absolute top-1/2 left-1/2 size-11 -translate-x-1/2 -translate-y-1/2 rounded-full",
                     movingMarker ? "cursor-grabbing" : "cursor-grab",
                   ].join(" ")}
                 />

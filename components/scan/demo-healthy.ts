@@ -6,9 +6,9 @@
  *
  *   test    presented as healthy — no disease call, and the severity number
  *           replaced by DEMO_HEALTHY_TEXT
- *   test1   Gray Leaf Spot
- *   test2   Northern Leaf Blight
- *   test3   Common Rust
+ *   leaf1   Gray Leaf Spot
+ *   leaf2   Northern Leaf Blight
+ *   leaf3   Common Rust
  *
  * The scan itself is untouched in every case — the photo is uploaded, the real
  * request runs, the real overlay comes back, and errors take the normal error
@@ -21,7 +21,7 @@
  *   blade is shown instead, and kept on the saved record so a reopened scan
  *   shows what the live one did.
  *
- *   `test1`-`test3` keep everything real except the name: the measured
+ *   `leaf1`-`leaf3` keep everything real except the name: the measured
  *   severity, the lesion overlay and the confidence are all the model's own
  *   output. Only `code` and `label` are substituted. That is why this one is
  *   applied once in showResult(), before the view and the record are built —
@@ -41,9 +41,9 @@ export function isDemoHealthyHybrid(hybrid: string): boolean {
 export const DEMO_HEALTHY_TEXT = "Confidence too low to classify disease";
 
 const DEMO_DISEASE_HYBRIDS: Record<string, DiseaseCode> = {
-  test1: "corn_gls",
-  test2: "corn_nlb",
-  test3: "corn_rust",
+  leaf1: "corn_gls",
+  leaf2: "corn_nlb",
+  leaf3: "corn_rust",
 };
 
 /**
