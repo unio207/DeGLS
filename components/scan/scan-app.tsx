@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
-import { LeafIcon, ScanLineIcon } from "lucide-react";
+import { CheckIcon, LeafIcon, ScanLineIcon } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -150,6 +150,10 @@ export function ScanApp() {
   const abortRef = useRef<AbortController | null>(null);
   // At most one speculative scan is ever alive. See Speculation above.
   const specRef = useRef<Speculation | null>(null);
+  // Mirrors specRef for rendering only. The ref drives the logic — it has to,
+  // because the effect must read the current speculation without re-running —
+  // so this exists purely to tell the grower the work is already under way.
+  const [specStatus, setSpecStatus] = useState<"idle" | "running" | "ready" | "failed">("idle");
   // Where the live speculation reports upload progress once submit() has
   // adopted it. Null while it is still running unwatched.
   const specWatcherRef = useRef<((fraction: number) => void) | null>(null);
@@ -197,6 +201,7 @@ export function ScanApp() {
     live?.controller.abort();
     specRef.current = null;
     specWatcherRef.current = null;
+    setSpecStatus("idle");
 
     const timer = setTimeout(() => {
       const controller = new AbortController();
@@ -231,6 +236,18 @@ export function ScanApp() {
         uploaded: false,
       };
       specRef.current = record;
+      setSpecStatus("running");
+      // Only the speculation still in the slot may report — a superseded one
+      // resolves after its abort and would otherwise announce a result that
+      // describes the previous photo.
+      void promise.then(
+        (response) => {
+          if (specRef.current === record) setSpecStatus(response.ok ? "ready" : "failed");
+        },
+        () => {
+          if (specRef.current === record) setSpecStatus("failed");
+        },
+      );
     }, SPECULATE_AFTER_MS);
 
     return () => clearTimeout(timer);
@@ -456,6 +473,7 @@ export function ScanApp() {
     specRef.current?.controller.abort();
     specRef.current = null;
     specWatcherRef.current = null;
+    setSpecStatus("idle");
     setPhase("compose");
     setView(null);
     setScanId(null);
@@ -534,11 +552,34 @@ export function ScanApp() {
                   <ScanLineIcon aria-hidden className="size-5 md:size-6" />
                   Assess severity
                 </Button>
+                {/* The scan starts as soon as the marker settles, so by the
+                    time the field notes are filled in the answer is usually
+                    already back. Saying so is not decoration: without it the
+                    instant result looks like the app skipped the work. A
+                    failed speculation deliberately says nothing — submit()
+                    retries it once, and most of those succeed. */}
                 <p
-                  className="text-muted-foreground mt-2 min-h-5 text-center text-[0.8125rem] md:text-sm"
+                  className="text-muted-foreground mt-2 flex min-h-5 items-center justify-center gap-1.5 text-center text-[0.8125rem] md:text-sm"
                   aria-live="polite"
                 >
-                  {!file ? "Add a leaf photo to start." : "Takes about 2–5 seconds."}
+                  {!file ? (
+                    "Add a leaf photo to start."
+                  ) : specStatus === "running" ? (
+                    <>
+                      <span
+                        aria-hidden
+                        className="bg-primary size-1.5 shrink-0 animate-pulse rounded-full"
+                      />
+                      Checking this leaf now — carry on filling in the notes.
+                    </>
+                  ) : specStatus === "ready" ? (
+                    <>
+                      <CheckIcon aria-hidden className="text-primary size-3.5 shrink-0" />
+                      Ready — your result will appear straight away.
+                    </>
+                  ) : (
+                    "Takes about 2–5 seconds."
+                  )}
                 </p>
               </div>
             </div>
