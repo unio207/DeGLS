@@ -1,0 +1,326 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+
+@custom-variant dark (&:is(.dark *));
+
+/* ---------------------------------------------------------------------------
+   DeGLS — field instrument
+   ---------------------------------------------------------------------------
+   Palette is derived from the existing DeGLS mark: the blade green (#688042),
+   the husk surface (#ecf4dc) and the tassel gold of the "GLS" letterforms.
+   Everything is tuned for a phone held at arm's length in direct sun, so the
+   text pairs sit well above AA and there are no thin grey hairlines carrying
+   meaning.
+
+   The severity ramp is SEQUENTIAL (leaf -> amber -> rust) rather than a
+   red/amber/green stoplight, so the colour encodes how much of the blade is
+   lesioned instead of splitting the range into pass and fail.
+--------------------------------------------------------------------------- */
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-sans);
+  --font-mono: var(--font-mono);
+  --font-heading: var(--font-display);
+  --font-display: var(--font-display);
+
+  /* Brand */
+  --color-blade: var(--blade);
+  --color-blade-ink: var(--blade-ink);
+  --color-husk: var(--husk);
+  --color-tassel: var(--tassel);
+
+  /* Severity ramp */
+  --color-band-trace: var(--band-trace);
+  --color-band-low: var(--band-low);
+  --color-band-moderate: var(--band-moderate);
+  --color-band-high: var(--band-high);
+  --color-band-severe: var(--band-severe);
+
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar: var(--sidebar);
+  --color-chart-5: var(--chart-5);
+  --color-chart-4: var(--chart-4);
+  --color-chart-3: var(--chart-3);
+  --color-chart-2: var(--chart-2);
+  --color-chart-1: var(--chart-1);
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+  --radius-2xl: calc(var(--radius) * 1.8);
+  --radius-3xl: calc(var(--radius) * 2.2);
+  --radius-4xl: calc(var(--radius) * 2.6);
+}
+
+:root {
+  --font-sans: var(--font-archivo), ui-sans-serif, system-ui, sans-serif;
+  --font-display: var(--font-archivo), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-plex-mono), ui-monospace, monospace;
+
+  --blade: #688042;
+  --blade-ink: #3f5325;
+  --husk: #ecf4dc;
+  --tassel: #9a6b00;
+
+  --background: #f6f9ef;
+  --foreground: #1f2a1a;
+  --card: #ffffff;
+  --card-foreground: #1f2a1a;
+  --popover: #ffffff;
+  --popover-foreground: #1f2a1a;
+  --primary: #4f6631;
+  --primary-foreground: #ffffff;
+  --secondary: #e4eed2;
+  --secondary-foreground: #2c3b23;
+  --muted: #eaf1dd;
+  --muted-foreground: #4a5940;
+  --accent: #e4eed2;
+  --accent-foreground: #2c3b23;
+  --destructive: #a3301b;
+  --border: #cfdcb6;
+  --input: #c3d3a5;
+  --ring: #688042;
+
+  --band-trace: #6f9142;
+  --band-low: #93a534;
+  --band-moderate: #c08c12;
+  --band-high: #b3651a;
+  --band-severe: #9c3f20;
+
+  --chart-1: var(--band-trace);
+  --chart-2: var(--band-low);
+  --chart-3: var(--band-moderate);
+  --chart-4: var(--band-high);
+  --chart-5: var(--band-severe);
+
+  --radius: 0.75rem;
+
+  --sidebar: #eaf1dd;
+  --sidebar-foreground: #1f2a1a;
+  --sidebar-primary: #4f6631;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #e4eed2;
+  --sidebar-accent-foreground: #2c3b23;
+  --sidebar-border: #cfdcb6;
+  --sidebar-ring: #688042;
+}
+
+.dark {
+  --blade: #9dbf62;
+  --blade-ink: #b9d488;
+  --husk: #1c2416;
+  --tassel: #ecce15;
+
+  --background: #101509;
+  --foreground: #edf3e0;
+  --card: #1a2113;
+  --card-foreground: #edf3e0;
+  --popover: #1e2617;
+  --popover-foreground: #edf3e0;
+  --primary: #a4c766;
+  --primary-foreground: #141a0d;
+  --secondary: #2a3420;
+  --secondary-foreground: #edf3e0;
+  --muted: #262f1d;
+  --muted-foreground: #b6c4a4;
+  --accent: #2a3420;
+  --accent-foreground: #edf3e0;
+  --destructive: #f08c6a;
+  --border: #38452b;
+  --input: #455434;
+  --ring: #9dbf62;
+
+  --band-trace: #92bb58;
+  --band-low: #bfc94a;
+  --band-moderate: #e8b12a;
+  --band-high: #e08640;
+  --band-severe: #dd6644;
+
+  --chart-1: var(--band-trace);
+  --chart-2: var(--band-low);
+  --chart-3: var(--band-moderate);
+  --chart-4: var(--band-high);
+  --chart-5: var(--band-severe);
+
+  --sidebar: #1a2113;
+  --sidebar-foreground: #edf3e0;
+  --sidebar-primary: #a4c766;
+  --sidebar-primary-foreground: #141a0d;
+  --sidebar-accent: #2a3420;
+  --sidebar-accent-foreground: #edf3e0;
+  --sidebar-border: #38452b;
+  --sidebar-ring: #9dbf62;
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+
+  html {
+    @apply font-sans;
+    /* iOS: keep the whole app from rubber-banding sideways. */
+    overflow-x: hidden;
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+    overflow-x: hidden;
+    overscroll-behavior-y: none;
+  }
+
+  /* Dirty hands, gloves, sun: never let a tap highlight flash grey. */
+  button,
+  [role="button"],
+  a,
+  label,
+  input,
+  summary {
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  /* Numerals in readouts must not jitter as they animate. */
+  .tabular {
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: "tnum" 1;
+  }
+}
+
+@layer utilities {
+  /* Uppercase mono eyebrow — the instrument-panel voice used for every field
+     label, tick and timestamp. */
+  .eyebrow {
+    font-family: var(--font-mono);
+    font-size: 0.6875rem;
+    line-height: 1;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    font-weight: 500;
+  }
+
+  /* The blade motif: parallel corn-leaf veins. Used exactly twice — behind the
+     masthead, and as the fill texture of the severity strip. */
+  .veins {
+    background-image: repeating-linear-gradient(
+      100deg,
+      color-mix(in oklch, var(--blade) 26%, transparent) 0px,
+      color-mix(in oklch, var(--blade) 26%, transparent) 1px,
+      transparent 1px,
+      transparent 7px
+    );
+  }
+
+  .veins-strong {
+    background-image: repeating-linear-gradient(
+      100deg,
+      rgb(255 255 255 / 0.34) 0px,
+      rgb(255 255 255 / 0.34) 1px,
+      transparent 1px,
+      transparent 6px
+    );
+  }
+
+  .safe-top {
+    padding-top: env(safe-area-inset-top);
+  }
+
+  .safe-bottom {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+
+  /* These utilities are emitted after Tailwind's, so a bare
+     `padding-left: env(...)` silently beat any `px-*` on the same element and
+     resolved to 0 on a device with no inset — <main> was measured flush to both
+     screen edges. The inset is now a floor under a caller-supplied minimum
+     instead of a replacement for it: set --safe-x and drop the px-* class. */
+  .safe-x {
+    padding-left: max(env(safe-area-inset-left), var(--safe-x, 0px));
+    padding-right: max(env(safe-area-inset-right), var(--safe-x, 0px));
+  }
+
+  /* The floor for any interactive control, not a size in its own right.
+     44px is Apple's phone target; on a tablet the raise to 48px is deliberate.
+     A 10" slab is held with one hand under it and tapped with the other, so the
+     tapping hand is unbraced — the precision a thumb gets from gripping a phone
+     is not available. Controls that need to stay square carry `md:size-12`
+     alongside this so the extra height does not stretch them into rectangles.
+
+     Sized controls sit above this floor on the same two-step scale:
+       primary full-width action   h-14  ->  md:h-15   (56 -> 60)
+       secondary action and input  h-12  ->  md:h-13   (48 -> 52)
+       icon button                 size-11 -> md:size-12 (44 -> 48) */
+  .tap {
+    min-height: 44px;
+  }
+
+  @media (min-width: 48rem) {
+    .tap {
+      min-height: 48px;
+    }
+  }
+}
+
+@keyframes degls-sweep {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(220%);
+  }
+}
+
+.animate-sweep {
+  animation: degls-sweep 1.5s cubic-bezier(0.4, 0, 0.3, 1) infinite;
+}
+
+@keyframes degls-rise {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.animate-rise {
+  animation: degls-rise 0.34s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

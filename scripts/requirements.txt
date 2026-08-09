@@ -1,0 +1,12 @@
+# Local dev tooling for scripts/ingest_corpus.py ONLY.
+#
+# Deliberately NOT api/requirements.txt: that file is the dependency set for the
+# serverless inference function and is size-constrained. Nothing here ships.
+#
+#   pip install -r scripts/requirements.txt
+#   python scripts/ingest_corpus.py
+
+openai>=1.40
+PyYAML>=6.0
+python-dotenv>=1.0
+pypdf>=4.2          # optional: only needed if you drop PDFs into corpus/
