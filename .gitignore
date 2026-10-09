@@ -46,25 +46,10 @@ __pycache__/
 .venv/
 venv/
 
-# vercel
-.vercel
-
-*.pyc
-.env*.local
-
 # legacy flask runtime output
-DeGLS_app/static/processed/
-DeGLS_app/static/uploads/
-DeGLS_app/__pycache__/
-DeGLS_app/utils/__pycache__/
 legacy/**/static/processed/
 # the 7 sample uploads are test fixtures and live in tests/fixtures/ instead
 legacy/**/static/uploads/
 
 # generated contact sheets / reports
 /reports/
-
-.vercel
-.env*
-
-.env*
