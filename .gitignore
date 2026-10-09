@@ -53,3 +53,7 @@ legacy/**/static/uploads/
 
 # generated contact sheets / reports
 /reports/
+
+# local agent instructions
+AGENTS.md
+CLAUDE.md
