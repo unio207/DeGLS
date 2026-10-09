@@ -1,0 +1,10 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "functions": {
+    "api/analyze.py": {
+      "maxDuration": 60,
+      "includeFiles": "models/**",
+      "excludeFiles": "{legacy/**,corpus/**,scripts/**,tests/**,reports/**,data/**,app/**,components/**,lib/**,public/**,node_modules/**,.next/**,.git/**}"
+    }
+  }
+}

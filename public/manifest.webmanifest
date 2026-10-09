@@ -1,0 +1,33 @@
+{
+  "name": "DeGLS — Corn leaf disease field scan",
+  "short_name": "DeGLS",
+  "description": "Photograph a corn leaf to identify gray leaf spot, northern leaf blight or common rust and measure how much of the blade is lesioned.",
+  "id": "/",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#f6f9ef",
+  "theme_color": "#f6f9ef",
+  "categories": ["utilities", "productivity"],
+  "icons": [
+    {
+      "src": "/icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}
