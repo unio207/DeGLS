@@ -36,6 +36,14 @@ The project won a 3rd Place Grand Award at the Regeneron International Science a
 ## Demo
 
 <p align="center">
+  <a href="docs/media/demo.mp4">
+    <img src="docs/media/poster.png" alt="DeGLS demo video poster: the result screen in a phone frame showing Gray Leaf Spot at 22% of the leaf with the lesion map, next to the caption Names the disease. Measures the damage." width="800">
+  </a>
+  <br>
+  <sub>28-second product demo, recorded from the live app on a sample leaf (<code>tests/fixtures/IMG_0551.jpeg</code>). Click to play.</sub>
+</p>
+
+<p align="center">
   <a href="https://youtu.be/dPj_7HmI-1g">
     <img src="https://img.youtube.com/vi/dPj_7HmI-1g/maxresdefault.jpg" alt="Watch the DeGLS demo video" width="640">
   </a>
