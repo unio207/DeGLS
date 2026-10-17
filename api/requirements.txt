@@ -4,7 +4,7 @@
 #
 # Measured cp312 manylinux_2_28 install size: 288 MB
 #   cv2 + libs 136 | onnxruntime 58 | numpy + libs 76 | Pillow + libs 17 | rest 1
-# Plus models/*.onnx (55 MB) => ~343 MB against Vercel's 500 MB uncompressed cap.
+# Plus models/*.onnx (96 MB with MobileSAM) => ~384 MB against Vercel's 500 MB uncompressed cap.
 #
 # Do NOT downgrade onnxruntime below 1.24: 1.22.x still declares sympy+mpmath
 # (85 MB, only used by the offline symbolic-shape-inference tool) as hard
