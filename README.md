@@ -10,7 +10,9 @@
 
 <p align="center">
   <a href="https://github.com/unio207/DeGLS/actions/workflows/ci.yml"><img src="https://github.com/unio207/DeGLS/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
-  <a href="https://degls.vercel.app"><img src="https://img.shields.io/badge/demo-degls.vercel.app-a3c96a" alt="Live demo"></a>
+
+https://github.com/user-attachments/assets/903d3208-76a1-4978-94f7-3f2c19df5871
+
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="License: MIT"></a>
   <img src="https://img.shields.io/badge/Next.js-16-black?logo=next.js" alt="Next.js 16">
   <img src="https://img.shields.io/badge/ONNX_Runtime-1.28-005CED?logo=onnx" alt="ONNX Runtime">
